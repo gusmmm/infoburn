@@ -1,0 +1,53 @@
+# Project Intelligence File
+
+## Project Patterns
+1. Medical Data Processing
+   - All patient data must be anonymized
+   - PDF documents contain admission/release information
+   - Google Sheets used for data entry
+
+2. Development Patterns
+   - Python backend with FastAPI
+   - React frontend
+   - MongoDB for data storage
+   - Pipeline-based processing
+
+3. File Organization
+   - Feature-based directory structure
+   - Clear separation of backend/frontend
+   - Modular components
+
+## Critical Paths
+1. PDF Processing Pipeline
+   ```
+   PDF -> Markdown -> Anonymized -> Structured -> Database
+   ```
+
+2. Google Sheets Integration
+   ```
+   Sheets -> Validation -> Processing -> Database
+   ```
+
+## User Preferences
+- To be discovered during development
+
+## Known Challenges
+1. Data Privacy
+   - Medical data requires strict privacy controls
+   - All patient information must be anonymized
+   - Audit trails required for data access
+
+2. Processing Pipeline
+   - PDF formats may vary
+   - Document structure preservation needed
+   - Real-time processing requirements
+
+## Tool Usage Patterns
+- To be established during development
+
+## Evolution Notes
+- Initial project setup
+- Memory bank established
+- Architecture defined
+
+This file will be updated as new patterns and preferences are discovered during development.
