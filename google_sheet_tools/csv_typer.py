@@ -17,10 +17,12 @@ from rich.panel import Panel
 from rich.progress import Progress
 import json
 
-# Constants
+# Constants - Update paths
+PROJECT_ROOT = Path(__file__).parent.parent  # Goes up from google_sheet_tools to infoburn root
 DATE_COLUMNS = ["data_ent", "data_alta", "data_nasc", "data_queim"]
-INPUT_FILE = Path("/home/gusmmm/Desktop/infoburn/data/source/gsheets/Doentes.csv")
-OUTPUT_DIR = Path("/home/gusmmm/Desktop/infoburn/data/source/gsheets")
+BASE_DIR = PROJECT_ROOT / "data" / "source" / "gsheets"
+INPUT_FILE = BASE_DIR / "Doentes.csv"
+OUTPUT_DIR = BASE_DIR  # Same as input directory
 OUTPUT_FILE = OUTPUT_DIR / "Doentes_typed.csv"
 
 # Initialize rich console
@@ -88,14 +90,7 @@ def format_date(date_str) -> str:
     return date_str
 
 def process_doentes_csv():
-    """
-    Process the Doentes.csv file:
-    1. Load data from predefined input path
-    2. Format ID column as string with leading zeros
-    3. Format date columns to standard dd-mm-yyyy format
-    4. Save to predefined output path
-    5. Create updated metadata file for the typed version
-    """
+    """Process the Doentes.csv file"""
     console.print(Panel("[bold cyan]CSV Typer for Doentes.csv[/bold cyan]"))
     
     try:
@@ -159,48 +154,53 @@ def process_doentes_csv():
 
 
 def copy_and_update_metadata(source_meta_path: Path, target_meta_path: Path, new_filename: str) -> bool:
-    """
-    Create a copy of the metadata JSON file with an updated filename.
-    
-    Args:
-        source_meta_path: Path to the source metadata JSON file
-        target_meta_path: Path where the new metadata file will be saved
-        new_filename: The new filename to set in the metadata
-        
-    Returns:
-        bool: True if successful, False otherwise
-    
-    This function reads a metadata JSON file, updates the filename field,
-    and saves it to a new location.
-    """
+    """Copy and update metadata files"""
     try:
-        console.print(f"[blue]Copying and updating metadata from[/blue] {source_meta_path}")
-        
-        # Read the source metadata file
-        with open(source_meta_path, 'r') as f:
-            metadata = json.load(f)
-        
-        # Update the filename
-        metadata["filename"] = new_filename
-        
-        # Save to the new location
-        with open(target_meta_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        
-        console.print(f"[green]✓ Metadata updated and saved to[/green] {target_meta_path}")
-        return True
-        
-    except FileNotFoundError:
-        console.print(f"[yellow]⚠ Source metadata file not found at {source_meta_path}[/yellow]")
+        # If source exists, copy and update it
+        if source_meta_path.exists():
+            with open(source_meta_path, 'r') as f:
+                metadata = json.load(f)
+                
+            # Update filename in metadata
+            metadata['filename'] = new_filename
+            
+            # Save updated metadata
+            with open(target_meta_path, 'w') as f:
+                json.dump(metadata, f, indent=2)
+                
+            return True
+            
         return False
-    except json.JSONDecodeError:
-        console.print(f"[red]Error: Invalid JSON in source metadata file[/red]")
-        return False
+        
     except Exception as e:
         console.print(f"[red]Error updating metadata: {str(e)}[/red]")
         return False
 
+def main():
+    """
+    Main entry point for CSV typer tool.
+    Provides a user interface for processing Doentes.csv file.
+    """
+    try:
+        console.print(Panel.fit(
+            "[bold cyan]CSV Typer Tool[/bold cyan]",
+            title="Burns Critical Care Unit"))
+            
+        # Check if input file exists
+        if not INPUT_FILE.exists():
+            console.print(f"[red]Error: Input file not found at {INPUT_FILE}[/red]")
+            return 1
+            
+        # Process the CSV file
+        process_doentes_csv()
+        
+        return 0
+        
+    except Exception as e:
+        console.print(f"[red]Error: {str(e)}[/red]")
+        import traceback
+        console.print(traceback.format_exc())
+        return 1
 
 if __name__ == "__main__":
-    # Run the CSV processing function
-    sys.exit(process_doentes_csv())
+    main()

@@ -370,6 +370,34 @@ def setup_menus() -> MenuManager:
         "Download and manage data from Google Sheets"
     )
     
+    # Add CSV Typing option
+    def launch_csv_typer():
+        from google_sheet_tools.csv_typer import main as csv_typer_main
+        try:
+            csv_typer_main()
+        except Exception as e:
+            manager.console.print(f"[bold red]Error in CSV Typer: {str(e)}[/bold red]")
+    
+    main_menu.add_option(
+        "Type CSV Data", 
+        launch_csv_typer,
+        "Convert and validate CSV data types"
+    )
+    
+    # Add Quality Control option
+    def launch_quality_control():
+        from quality_control_tools.main_quality import main as qc_main
+        try:
+            qc_main()
+        except Exception as e:
+            manager.console.print(f"[bold red]Error in Quality Control: {str(e)}[/bold red]")
+    
+    main_menu.add_option(
+        "Quality Control Tools", 
+        launch_quality_control,
+        "Run data quality control checks"
+    )
+    
     # Add Analytics menu stub for future expansion
     analytics_menu = main_menu.add_submenu("Data Analytics")
     analytics_menu.add_option(
