@@ -136,7 +136,7 @@ def main():
     """
     try:
         # Initialize quality control
-        qc = BaseQualityControl("Doentes.csv")
+        qc = BaseQualityControl("Doentes_typed.csv")
         
         # Load the data
         qc.load_data()

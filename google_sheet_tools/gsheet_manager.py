@@ -177,14 +177,9 @@ class GoogleSheetsClient:
             
         Returns:
             List[Dict[str, Any]]: List of rows as dictionaries with column headers as keys
-            
-        Raises:
-            gspread.exceptions.WorksheetNotFound: If sheet_name doesn't exist
-            IndexError: If sheet_index is out of range
         """
         spreadsheet = self.open_spreadsheet(spreadsheet_id)
         
-        # Get the specified worksheet
         try:
             if sheet_name:
                 worksheet = spreadsheet.worksheet(sheet_name)
@@ -192,11 +187,10 @@ class GoogleSheetsClient:
             else:
                 worksheet = spreadsheet.get_worksheet(sheet_index)
                 self.logger.info(f"Accessed worksheet at index {sheet_index}: '{worksheet.title}'")
-        
-            # Get all records (list of dictionaries)
+    
+            # Get raw values and convert to list of dictionaries
             data = worksheet.get_all_records()
             self.logger.info(f"Retrieved {len(data)} rows of data")
-            
             return data
             
         except gspread.exceptions.WorksheetNotFound:
@@ -215,7 +209,7 @@ class GoogleSheetsClient:
         
         Args:
             sheet_name: Name of the worksheet to access
-            sheet_index: Index of the worksheet if name not provided (default: 0)
+            sheet_index: Index of worksheet if name not provided (default: 0)
             spreadsheet_id: The spreadsheet ID (if None, uses Config value)
             
         Returns:
@@ -237,30 +231,28 @@ class GoogleSheetsClient:
         return hashlib.md5(data.to_csv(index=False).encode()).hexdigest()
 
     def download_worksheet(self, 
-                      sheet_name: Optional[str] = None, 
-                      sheet_index: int = 0,
-                      spreadsheet_id: Optional[str] = None,
-                      output_format: str = "csv",
-                      output_dir: Optional[Path] = None,
-                      filename: Optional[str] = None) -> Path:
+                  sheet_name: Optional[str] = None, 
+                  sheet_index: int = 0,
+                  spreadsheet_id: Optional[str] = None,
+                  output_format: str = "csv",
+                  output_dir: Optional[Path] = None,
+                  filename: Optional[str] = None) -> Path:
         """
         Download worksheet data to a file and store metadata for change tracking.
         """
-        # Get data as DataFrame
-        df = self.get_worksheet_as_dataframe(sheet_name, sheet_index, spreadsheet_id)
+        # Get data directly using get_worksheet_data 
+        data = self.get_worksheet_data(sheet_name, sheet_index, spreadsheet_id)
         
-        if df.empty:
+        if not data:
             self.logger.warning("No data found in worksheet")
             return None
         
-        # Get the hash from the raw data before any modifications
+        # Create DataFrame
+        df = pd.DataFrame(data)
+        
+        # Calculate hash from raw data
         current_hash = self.calculate_hash(df)
         
-        # Fix ID column handling
-        if "ID" in df.columns:
-            df["ID"] = df["ID"].astype(str)
-            df["ID"] = df["ID"].apply(lambda x: x.zfill(4) if len(x) < 4 else x)
-
         # Setup output directory
         if output_dir is None:
             output_dir = SPREADSHEET_SOURCE
@@ -297,7 +289,7 @@ class GoogleSheetsClient:
                 "row_count": len(df),
                 "column_count": len(df.columns),
                 "columns": df.columns.tolist(),
-                "data_hash": current_hash,  # Use the hash from Google Sheet
+                "data_hash": current_hash,
                 "revision_id": str(int(time.time()))
             }
             
@@ -374,9 +366,12 @@ class GoogleSheetsClient:
             output_path = SPREADSHEET_SOURCE / f"{selected_worksheet.title}.csv"
             meta_path = output_path.with_suffix('.meta.json')
             
-            # Calculate hash using the same method
-            current_data = pd.DataFrame(selected_worksheet.get_all_records())
-            current_hash = self.calculate_hash(current_data)
+            # Get raw data
+            raw_data = self.get_worksheet_data(selected_worksheet.title)
+            df = pd.DataFrame(raw_data)
+            
+            # Calculate hash
+            current_hash = self.calculate_hash(df)
             
             info_table = Table(title="📊 Worksheet Information", show_header=False)
             info_table.add_row("Title", selected_worksheet.title)
@@ -402,6 +397,15 @@ class GoogleSheetsClient:
             if Confirm.ask("Download this worksheet?"):
                 self.download_worksheet(sheet_name=selected_worksheet.title)
                 console.print("[green]✓ Download complete![/green]")
+                
+                # Verify hash matches after download
+                if meta_path.exists():
+                    with open(meta_path) as f:
+                        metadata = json.load(f)
+                        if metadata.get('data_hash') == current_hash:
+                            console.print("[green]✓ Hash verification successful[/green]")
+                        else:
+                            console.print("[red]! Hash verification failed[/red]")
             else:
                 console.print("[yellow]Download cancelled[/yellow]")
                 
