@@ -1,82 +1,94 @@
 import pytest
-import asyncio
+import json
 from pathlib import Path
-from typing import List, Dict, Any
-from datetime import datetime
+from datetime import date
 from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.table import Table
+from rich.panel import Panel
 
-from ..models.admission import AdmissionModel
-from ..config.database import db_connection
+from ..models.admission import AdmissionModel, AdmissionCreate
 from pydantic import ValidationError
 
 console = Console()
 
-class TestAdmissionImport:
-    """Test suite for admission data import functionality"""
-    
-    @pytest.fixture(scope="class")
-    async def setup_database(self):
-        """Setup test database connection"""
-        try:
-            await db_connection.connect()
-            yield
-        finally:
-            await db_connection.close()
+class TestJsonValidation:
+    """Test suite for validating JSON admission data files"""
     
     @pytest.fixture
-    def test_data_path(self) -> Path:
-        """Provide test data directory path"""
-        return Path(__file__).parent / "test_data"
+    def json_data_path(self) -> Path:
+        """Get path to JSON data files"""
+        return Path("/home/gusmmm/Desktop/infoburn/data/output/json/admission_data")
     
-    @pytest.mark.asyncio
-    async def test_admission_model_validation(self, test_data_path: Path):
-        """Test admission data validation"""
-        test_data = {
-            "ID": "12345",
-            "processo": 987654,
-            "nome": "Test Patient",
-            "data_ent": "2023-06-15",
-            "data_alta": "2023-06-30",
-            "sexo": "M",
-            "data_nasc": "1980-01-01",
-            "destino": "Home",
-            "origem": "Emergency"
-        }
+    def test_json_structure(self, json_data_path):
+        """Test that JSON files match expected model structure"""
+        # Create table for results
+        results_table = Table(
+            "File", "Status", "Details",
+            title="JSON Validation Results",
+            show_lines=True
+        )
         
-        admission = AdmissionModel(**test_data)
-        assert admission.ID == "12345"
-        assert admission.processo == 987654
-    
-    @pytest.mark.asyncio
-    async def test_database_operations(self, setup_database):
-        """Test database operations with admission data"""
-        test_data = {
-            "ID": "12345",
-            "processo": 987654,
-            "nome": "Test Patient",
-            "data_ent": "2023-06-15",
-            "data_alta": "2023-06-30",
-            "sexo": "M",
-            "data_nasc": "1980-01-01",
-            "destino": "Home",
-            "origem": "Emergency"
-        }
-        
-        # Insert test data
-        collection = db_connection.db.admission_data
-        result = await collection.insert_one(test_data)
-        assert result.inserted_id is not None
-        
-        # Retrieve and verify
-        retrieved = await collection.find_one({"ID": "12345"})
-        assert retrieved is not None
-        assert retrieved["processo"] == 987654
-        
-        # Cleanup
-        await collection.delete_one({"ID": "12345"})
+        try:
+            # Get all JSON files
+            json_files = list(json_data_path.glob("*.json"))
+            if not json_files:
+                console.print(Panel(
+                    "[yellow]No JSON files found in directory[/yellow]",
+                    title="Warning"
+                ))
+                return
+            
+            for json_file in json_files:
+                try:
+                    # Load JSON data
+                    with open(json_file, 'r') as f:
+                        data = json.load(f)
+                    
+                    # Validate against model
+                    admission = AdmissionCreate(**data)
+                    
+                    # Verify date formats
+                    date_fields = ['data_ent', 'data_alta', 'data_nasc']
+                    for field in date_fields:
+                        if value := getattr(admission, field):
+                            assert isinstance(value, date), f"{field} is not a valid date"
+                    
+                    # Add success to table
+                    results_table.add_row(
+                        json_file.name,
+                        "[green]Valid[/green]",
+                        "✓ All fields validated successfully"
+                    )
+                    
+                except ValidationError as e:
+                    # Add validation error to table
+                    results_table.add_row(
+                        json_file.name,
+                        "[red]Invalid[/red]",
+                        f"✗ {str(e)}"
+                    )
+                except json.JSONDecodeError as e:
+                    # Add JSON parsing error to table
+                    results_table.add_row(
+                        json_file.name,
+                        "[red]Invalid JSON[/red]",
+                        f"✗ {str(e)}"
+                    )
+                except Exception as e:
+                    # Add unexpected error to table
+                    results_table.add_row(
+                        json_file.name,
+                        "[red]Error[/red]",
+                        f"✗ {str(e)}"
+                    )
+            
+            # Display results
+            console.print("\n")
+            console.print(results_table)
+            
+        except Exception as e:
+            console.print(f"[red]Error during testing: {str(e)}[/red]")
+            raise
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

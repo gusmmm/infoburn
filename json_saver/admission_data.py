@@ -156,7 +156,7 @@ class AdmissionDataConverter:
         """
         Convert Pydantic model to a dictionary ready for JSON serialization.
         
-        Prepares the data for MongoDB by setting ID as _id field.
+        ID is the unique ID field.
         
         Args:
             model: Validated AdmissionDataPatient model
@@ -168,7 +168,7 @@ class AdmissionDataConverter:
         data_dict = model.model_dump()
         
         # Set _id field for MongoDB and remove original ID
-        data_dict["_id"] = data_dict.pop("ID")
+        data_dict["ID"] = data_dict.pop("ID")
         
         return data_dict
     
@@ -190,7 +190,7 @@ class AdmissionDataConverter:
             return True
         except Exception as e:
             self.errors.append({
-                "id": data.get("_id", "Unknown"),
+                "id": data.get("ID", "Unknown"),
                 "error": f"Error saving file {filename}: {str(e)}",
                 "data": data
             })
@@ -238,7 +238,7 @@ class AdmissionDataConverter:
                     json_dict = self.model_to_json_dict(model)
                     
                     # Create filename based on ID
-                    filename = f"{json_dict['_id']}.json"
+                    filename = f"{json_dict['ID']}.json"
                     
                     # Save JSON file
                     if self.save_json_file(json_dict, filename):
