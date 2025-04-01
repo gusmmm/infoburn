@@ -1,14 +1,17 @@
 from datetime import date
 from typing import Optional
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+from pydantic import Field, field_validator, model_validator, ConfigDict
 from enum import Enum
+import re
+import json
+from .base import InfoBurnBaseModel, PyObjectId
 
 class Gender(str, Enum):
     """Enumeration for patient gender"""
     MALE = "M"
     FEMALE = "F"
 
-class AdmissionBase(BaseModel):
+class AdmissionBase(InfoBurnBaseModel):
     """Base model for admissions with common fields"""
     ID: str = Field(description="Patient admission identifier (4-5 digits)", pattern=r"^\d{4,5}$")
     processo: Optional[int] = Field(None, description="Patient file number")
@@ -21,7 +24,6 @@ class AdmissionBase(BaseModel):
     origem: Optional[str] = Field(None, description="Origin facility/location")
 
     model_config = ConfigDict(
-        from_attributes=True,
         str_strip_whitespace=True,
         validate_assignment=True
     )
@@ -63,4 +65,4 @@ class AdmissionCreate(AdmissionBase):
 
 class AdmissionResponse(AdmissionBase):
     """Schema for responses including the MongoDB ID"""
-    id: str = Field(alias='_id')
+    id: PyObjectId = Field(alias='_id')
