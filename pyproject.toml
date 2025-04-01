@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.12",
     "google-api-python-client>=2.166.0",
+    "google-genai>=1.9.0",
     "gspread>=6.2.0",
     "ipykernel>=6.29.5",
     "logfire>=3.12.0",
