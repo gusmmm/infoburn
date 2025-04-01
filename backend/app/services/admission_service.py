@@ -1,34 +1,70 @@
 from typing import List, Optional
+from datetime import date, datetime
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from ..config.database import db_connection
-from ..models.admission import AdmissionModel
-from rich.console import Console
+from ..models.admission import AdmissionCreate, AdmissionResponse
 from fastapi import HTTPException, status
+from rich.console import Console
 
 console = Console()
 
 class AdmissionService:
+    """Service for managing admission records"""
+    
     @staticmethod
-    async def create_admission(admission: AdmissionModel) -> AdmissionModel:
+    def _serialize_dates(data: dict) -> dict:
+        """
+        Convert date objects to MongoDB datetime objects
+        
+        Args:
+            data: Dictionary containing date fields
+            
+        Returns:
+            dict: Data with dates converted to datetime objects
+        """
+        date_fields = ['data_ent', 'data_alta', 'data_nasc']
+        for field in date_fields:
+            if field in data and isinstance(data[field], date):
+                # Convert to datetime at midnight UTC
+                data[field] = datetime.combine(data[field], datetime.min.time())
+        return data
+    
+    @staticmethod
+    def _deserialize_dates(data: dict) -> dict:
+        """
+        Convert MongoDB datetime objects back to date objects
+        
+        Args:
+            data: Dictionary containing datetime fields
+            
+        Returns:
+            dict: Data with datetimes converted to date objects
+        """
+        date_fields = ['data_ent', 'data_alta', 'data_nasc']
+        for field in date_fields:
+            if field in data and isinstance(data[field], datetime):
+                data[field] = data[field].date()
+        return data
+    
+    @staticmethod
+    async def create_admission(admission: AdmissionCreate) -> AdmissionResponse:
         """
         Creates a new admission record in the database.
         
         Args:
-            admission: AdmissionModel instance to be created
+            admission: AdmissionCreate instance with admission data
             
         Returns:
-            AdmissionModel: Created admission with MongoDB generated _id
+            AdmissionResponse: Created admission with MongoDB generated _id
             
         Raises:
-            HTTPException: If admission with same ID already exists or other database errors
+            HTTPException: If admission with same ID exists or other database errors
         """
         try:
-            # Convert model to dict for MongoDB
-            admission_dict = admission.model_dump(
-                by_alias=True,
-                exclude={'_id'} if not admission.id else set(),
-                exclude_none=True
+            # Convert model to dict and serialize dates for MongoDB
+            admission_dict = AdmissionService._serialize_dates(
+                admission.model_dump(exclude_none=True)
             )
             
             # Check if admission with same ID exists
@@ -40,15 +76,9 @@ class AdmissionService:
                 )
             
             # Insert into MongoDB
-            try:
-                result = await db_connection.db.admission_data.insert_one(admission_dict)
-            except DuplicateKeyError:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Admission with ID {admission.ID} already exists"
-                )
+            result = await db_connection.db.admission_data.insert_one(admission_dict)
             
-            # Fetch the complete document
+            # Fetch the complete document with the generated _id
             created_doc = await db_connection.db.admission_data.find_one(
                 {"_id": result.inserted_id}
             )
@@ -56,8 +86,9 @@ class AdmissionService:
             if not created_doc:
                 raise ValueError("Failed to retrieve created document")
             
-            # Return new model instance with MongoDB data
-            return AdmissionModel.from_mongo(created_doc)
+            # Deserialize dates and return response model
+            deserialized_doc = AdmissionService._deserialize_dates(created_doc)
+            return AdmissionResponse(**deserialized_doc)
             
         except HTTPException:
             raise
@@ -67,15 +98,3 @@ class AdmissionService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=str(e)
             )
-
-    @staticmethod
-    async def get_admission(admission_id: str) -> Optional[AdmissionModel]:
-        """Retrieves an admission record by ID."""
-        try:
-            object_id = ObjectId(admission_id)
-            if (admission := await db_connection.db.admission_data.find_one({"_id": object_id})):
-                return AdmissionModel.from_mongo(admission)
-            return None
-        except Exception as e:
-            console.print(f"[red]Error retrieving admission: {str(e)}[/red]")
-            raise
