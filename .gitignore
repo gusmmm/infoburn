@@ -62,3 +62,4 @@ local_settings.py
 # Temporary files
 .tmp/
 tmp/
+reports/
