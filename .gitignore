@@ -3,6 +3,7 @@
 .env.*
 credentials/*
 data/*
+reports/*
 
 # Virtual environments
 .venv/
@@ -62,4 +63,3 @@ local_settings.py
 # Temporary files
 .tmp/
 tmp/
-reports/
