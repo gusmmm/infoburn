@@ -1,15 +1,28 @@
 from typing import List, Optional
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from ..config.database import db_connection
 from ..models.admission import AdmissionModel
 from rich.console import Console
+from fastapi import HTTPException, status
 
 console = Console()
 
 class AdmissionService:
     @staticmethod
     async def create_admission(admission: AdmissionModel) -> AdmissionModel:
-        """Creates a new admission record in the database."""
+        """
+        Creates a new admission record in the database.
+        
+        Args:
+            admission: AdmissionModel instance to be created
+            
+        Returns:
+            AdmissionModel: Created admission with MongoDB generated _id
+            
+        Raises:
+            HTTPException: If admission with same ID already exists or other database errors
+        """
         try:
             # Convert model to dict for MongoDB
             admission_dict = admission.model_dump(
@@ -18,8 +31,22 @@ class AdmissionService:
                 exclude_none=True
             )
             
+            # Check if admission with same ID exists
+            existing = await db_connection.db.admission_data.find_one({"ID": admission.ID})
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Admission with ID {admission.ID} already exists"
+                )
+            
             # Insert into MongoDB
-            result = await db_connection.db.admission_data.insert_one(admission_dict)
+            try:
+                result = await db_connection.db.admission_data.insert_one(admission_dict)
+            except DuplicateKeyError:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Admission with ID {admission.ID} already exists"
+                )
             
             # Fetch the complete document
             created_doc = await db_connection.db.admission_data.find_one(
@@ -32,9 +59,14 @@ class AdmissionService:
             # Return new model instance with MongoDB data
             return AdmissionModel.from_mongo(created_doc)
             
+        except HTTPException:
+            raise
         except Exception as e:
             console.print(f"[red]Error creating admission: {str(e)}[/red]")
-            raise
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e)
+            )
 
     @staticmethod
     async def get_admission(admission_id: str) -> Optional[AdmissionModel]:

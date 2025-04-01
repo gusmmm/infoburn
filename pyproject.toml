@@ -17,6 +17,7 @@ dependencies = [
     "motor>=3.7.0",
     "pandas>=2.2.3",
     "pydantic>=2.11.1",
+    "pydantic-settings>=2.8.1",
     "python-dotenv>=1.1.0",
     "rich>=14.0.0",
     "uvicorn>=0.34.0",
