@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Query
+from typing import Optional
 from ..models.admission import AdmissionCreate, AdmissionResponse
 from ..services.admission_service import AdmissionService
 
@@ -26,3 +27,50 @@ async def create_admission(admission: AdmissionCreate):
             - 500: For other server errors
     """
     return await AdmissionService.create_admission(admission)
+
+@router.get("/", response_model=AdmissionResponse)
+async def get_admission(
+    ID: Optional[str] = Query(None, pattern=r"^\d{4,5}$", description="Patient admission identifier (4-5 digits)"),
+    processo: Optional[int] = Query(None, description="Patient file number")
+) -> AdmissionResponse:
+    """
+    Retrieve a patient admission record by ID or processo number.
+    At least one parameter must be provided.
+    
+    Args:
+        ID: The admission identifier (4-5 digits)
+        processo: The patient file number
+    
+    Returns:
+        AdmissionResponse: The patient admission record
+        
+    Raises:
+        HTTPException: 
+            - 400: If neither ID nor processo is provided
+            - 404: If patient is not found
+            - 500: For other server errors
+    """
+    # Validate that at least one parameter is provided
+    if ID is None and processo is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either ID or processo must be provided"
+        )
+    
+    try:
+        # Prioritize ID if both are provided
+        if ID is not None:
+            return await AdmissionService.get_admission(ID, "ID")
+        return await AdmissionService.get_admission(str(processo), "processo")
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving admission: {str(e)}"
+        )

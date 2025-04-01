@@ -1,52 +1,59 @@
-from typing import List, Optional
-from datetime import date, datetime
-from bson import ObjectId
-from pymongo.errors import DuplicateKeyError
-from ..config.database import db_connection
-from ..models.admission import AdmissionCreate, AdmissionResponse
+from typing import Optional, Any, Dict
 from fastapi import HTTPException, status
 from rich.console import Console
+from ..models.admission import AdmissionCreate, AdmissionResponse
+from ..config.database import db_connection
 
 console = Console()
 
 class AdmissionService:
-    """Service for managing admission records"""
+    """Service for handling admission data operations"""
     
     @staticmethod
-    def _serialize_dates(data: dict) -> dict:
+    async def get_admission(identifier: str, search_by: str) -> AdmissionResponse:
         """
-        Convert date objects to MongoDB datetime objects
+        Retrieve an admission by ID or processo
         
         Args:
-            data: Dictionary containing date fields
+            identifier: The ID or processo value to search for
+            search_by: The field to search by ('ID' or 'processo')
             
         Returns:
-            dict: Data with dates converted to datetime objects
-        """
-        date_fields = ['data_ent', 'data_alta', 'data_nasc']
-        for field in date_fields:
-            if field in data and isinstance(data[field], date):
-                # Convert to datetime at midnight UTC
-                data[field] = datetime.combine(data[field], datetime.min.time())
-        return data
-    
-    @staticmethod
-    def _deserialize_dates(data: dict) -> dict:
-        """
-        Convert MongoDB datetime objects back to date objects
-        
-        Args:
-            data: Dictionary containing datetime fields
+            AdmissionResponse: The found admission
             
-        Returns:
-            dict: Data with datetimes converted to date objects
+        Raises:
+            ValueError: If processo search with non-numeric identifier
+            HTTPException: If admission not found
         """
-        date_fields = ['data_ent', 'data_alta', 'data_nasc']
-        for field in date_fields:
-            if field in data and isinstance(data[field], datetime):
-                data[field] = data[field].date()
-        return data
-    
+        try:
+            # Convert processo to int if needed
+            if search_by == "processo":
+                try:
+                    identifier = int(identifier)
+                except ValueError:
+                    raise ValueError("Processo must be a valid number")
+            
+            # Search database
+            result = await db_connection.db.admission_data.find_one(
+                {search_by: identifier}
+            )
+            
+            if not result:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Admission with {search_by}={identifier} not found"
+                )
+            
+            return AdmissionResponse(**result)
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Database error: {str(e)}"
+            )
+
     @staticmethod
     async def create_admission(admission: AdmissionCreate) -> AdmissionResponse:
         """
