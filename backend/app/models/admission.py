@@ -1,33 +1,18 @@
 from datetime import datetime, date
 from typing import Optional
 from .base import InfoBurnBaseModel, PyObjectId
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator, ConfigDict
 from enum import Enum
 import re
-
-class Gender(str, Enum):
-    """Enumeration for patient gender"""
-    MALE = "M"
-    FEMALE = "F"
 
 class AdmissionModel(InfoBurnBaseModel):
     """
     Represents a patient admission in the burns unit.
-    
-    Attributes:
-        ID: Unique identifier for the admission (MongoDB ObjectId with alias _id)
-        processo: Patient file number
-        nome: Full name of the patient
-        data_ent: Date of admission to the Burns Critical Care Unit
-        data_alta: Release date from the Burns Critical Care Unit
-        sexo: Patient gender (M or F)
-        data_nasc: Patient's birth date
-        destino: Discharge destination after release from the unit
-        origem: Origin facility/location before admission to the unit
     """
-    ID: PyObjectId = Field(
-        alias='_id',
-        description="Unique identifier for the admission"
+    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    ID: str = Field(
+        description="Patient admission identifier (4-5 digits)",
+        pattern=r"^\d{4,5}$"
     )
     processo: Optional[int] = Field(
         None,
@@ -45,7 +30,7 @@ class AdmissionModel(InfoBurnBaseModel):
         None,
         description="Release date from the Burns Critical Care Unit"
     )
-    sexo: Optional[Gender] = Field(
+    sexo: Optional[str] = Field(
         None,
         description="Patient gender (M or F)"
     )
@@ -62,6 +47,22 @@ class AdmissionModel(InfoBurnBaseModel):
         description="Origin facility/location before admission to the unit"
     )
     
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+        json_encoders={
+            date: lambda d: d.isoformat() if d else None
+        }
+    )
+    
+    @field_validator('ID')
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        """Ensure ID is a 4-5 digit string and properly formatted"""
+        if not v or not re.match(r'^\d{4,5}$', v):
+            raise ValueError('ID must be a 4-5 digit string')
+        return v
+    
     @model_validator(mode='after')
     def validate_dates(self) -> 'AdmissionModel':
         """Validate that admission date is before release date if both are present"""
@@ -75,6 +76,28 @@ class AdmissionModel(InfoBurnBaseModel):
         if self.data_nasc and self.data_ent and self.data_nasc > self.data_ent:
             raise ValueError("Birth date must be before admission date")
         return self
+
+    def model_dump(self, *args, **kwargs):
+        """Override model_dump to convert dates to ISO format strings"""
+        dump = super().model_dump(*args, **kwargs)
+        # Convert dates to ISO format strings for MongoDB storage
+        for field in ['data_ent', 'data_alta', 'data_nasc']:
+            if dump.get(field):
+                dump[field] = dump[field].isoformat()
+        return dump
+    
+    @classmethod
+    def from_mongo(cls, data):
+        """Convert MongoDB data back to model instance"""
+        if not data:
+            return None
+        
+        # Convert ISO format strings back to dates
+        for field in ['data_ent', 'data_alta', 'data_nasc']:
+            if data.get(field):
+                data[field] = datetime.fromisoformat(data[field]).date()
+        
+        return cls(**data)
 
 # Rebuild model to resolve forward references
 AdmissionModel.model_rebuild()

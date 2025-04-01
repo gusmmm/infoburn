@@ -1,17 +1,31 @@
-from pydantic import BaseModel, ConfigDict
-from datetime import datetime
-from typing import Optional
 from bson import ObjectId
+from pydantic import BaseModel, ConfigDict
 
 class PyObjectId(ObjectId):
+    """Custom type for handling MongoDB ObjectIds"""
+    
     @classmethod
     def __get_validators__(cls):
         yield cls.validate
-    
+        
+    @classmethod
+    def validate(cls, v):
+        """Validate and convert the value to ObjectId"""
+        if isinstance(v, ObjectId):
+            return v
+        if isinstance(v, str):
+            try:
+                return ObjectId(v)
+            except Exception:
+                raise ValueError("Invalid ObjectId")
+        raise ValueError("Invalid ObjectId")
+
     @classmethod
     def __get_pydantic_core_schema__(cls, _source_type, _handler):
+        """Define the Pydantic core schema for PyObjectId"""
         from pydantic_core import core_schema
         return core_schema.json_or_python_schema(
+            json_schema=core_schema.str_schema(),
             python_schema=core_schema.union_schema([
                 core_schema.is_instance_schema(ObjectId),
                 core_schema.chain_schema([
@@ -19,31 +33,14 @@ class PyObjectId(ObjectId):
                     core_schema.no_info_plain_validator_function(cls.validate),
                 ])
             ]),
-            json_schema=core_schema.str_schema(),
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda x: str(x)
+            ),
         )
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-
-    @classmethod
-    def validate(cls, v):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
 
 class InfoBurnBaseModel(BaseModel):
-    """
-    Base model for all InfoBurn models.
-    Implements common configuration and functionality.
-    
-    Attributes:
-        model_config: Pydantic V2 configuration
-    """
+    """Base model for InfoBurn models"""
     model_config = ConfigDict(
-        validate_assignment=True,
-        validate_by_name=True,  # Replaces allow_population_by_field_name
-        json_encoders={
-            ObjectId: str,
-            datetime: lambda v: v.isoformat()
-        }
+        arbitrary_types_allowed=True,
+        populate_by_name=True
     )

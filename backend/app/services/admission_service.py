@@ -1,4 +1,5 @@
 from typing import List, Optional
+from bson import ObjectId
 from ..config.database import db_connection
 from ..models.admission import AdmissionModel
 from rich.console import Console
@@ -6,46 +7,42 @@ from rich.console import Console
 console = Console()
 
 class AdmissionService:
-    """
-    Service class for handling admission-related operations.
-    
-    This class provides methods for CRUD operations on admission records
-    and implements business logic related to patient admissions.
-    """
-    
     @staticmethod
     async def create_admission(admission: AdmissionModel) -> AdmissionModel:
-        """
-        Creates a new admission record in the database.
-        
-        Args:
-            admission: AdmissionModel instance containing admission data
-            
-        Returns:
-            AdmissionModel: The created admission record
-        """
+        """Creates a new admission record in the database."""
         try:
-            result = await db_connection.db.admission_data.insert_one(admission.dict(by_alias=True))
-            admission.id = result.inserted_id
-            return admission
+            # Convert model to dict for MongoDB
+            admission_dict = admission.model_dump(
+                by_alias=True,
+                exclude={'_id'} if not admission.id else set(),
+                exclude_none=True
+            )
+            
+            # Insert into MongoDB
+            result = await db_connection.db.admission_data.insert_one(admission_dict)
+            
+            # Fetch the complete document
+            created_doc = await db_connection.db.admission_data.find_one(
+                {"_id": result.inserted_id}
+            )
+            
+            if not created_doc:
+                raise ValueError("Failed to retrieve created document")
+            
+            # Return new model instance with MongoDB data
+            return AdmissionModel.from_mongo(created_doc)
+            
         except Exception as e:
             console.print(f"[red]Error creating admission: {str(e)}[/red]")
             raise
 
     @staticmethod
     async def get_admission(admission_id: str) -> Optional[AdmissionModel]:
-        """
-        Retrieves an admission record by ID.
-        
-        Args:
-            admission_id: String representation of the admission ObjectId
-            
-        Returns:
-            Optional[AdmissionModel]: The admission record if found, None otherwise
-        """
+        """Retrieves an admission record by ID."""
         try:
-            if (admission := await db_connection.db.admission_data.find_one({"_id": admission_id})):
-                return AdmissionModel(**admission)
+            object_id = ObjectId(admission_id)
+            if (admission := await db_connection.db.admission_data.find_one({"_id": object_id})):
+                return AdmissionModel.from_mongo(admission)
             return None
         except Exception as e:
             console.print(f"[red]Error retrieving admission: {str(e)}[/red]")
