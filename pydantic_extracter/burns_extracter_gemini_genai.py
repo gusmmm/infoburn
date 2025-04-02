@@ -38,8 +38,8 @@ class BurnsExtracter:
         
         # Configure Gemini AI
         self.client = genai.Client(api_key=self.api_key)
-        self.model_name = "gemini-2.5-pro-exp-03-25"
-        
+        #self.model_name = "gemini-2.5-pro-exp-03-25"
+        self.model_name = "gemini-2.0-flash"
         # Setup logging
         logging.basicConfig(
             level=logging.INFO,
@@ -202,7 +202,49 @@ class BurnsExtracter:
             self.logger.error(f"Error cleaning JSON response: {str(e)}")
             raise ValueError(f"Failed to clean JSON response: {str(e)}")
     
-   
+    def _deduplicate_burns(self, burns_model: BurnsModel) -> BurnsModel:
+        """
+        Remove duplicate burn entries from the BurnsModel.
+        
+        Args:
+            burns_model (BurnsModel): Original burns model
+            
+        Returns:
+            BurnsModel: Burns model with deduplicated burns list
+        """
+        if not burns_model.burns:
+            return burns_model
+            
+        # Convert burns to hashable format for deduplication
+        unique_burns = []
+        seen = set()
+        
+        for burn in burns_model.burns:
+            # Create a tuple of burn attributes for comparison
+            burn_key = (
+                burn.location,
+                burn.laterality,
+                burn.depth,
+                burn.circumferencial
+            )
+            
+            if burn_key not in seen:
+                seen.add(burn_key)
+                unique_burns.append(burn)
+                
+        if len(burns_model.burns) != len(unique_burns):
+            self.console.print(
+                f"[yellow]Warning: Removed {len(burns_model.burns) - len(unique_burns)} duplicate burn entries[/yellow]"
+            )
+            self.logger.warning(
+                f"Removed {len(burns_model.burns) - len(unique_burns)} duplicate burn entries"
+            )
+            
+        # Create new model with deduplicated burns
+        model_dict = burns_model.model_dump()
+        model_dict['burns'] = unique_burns
+        return BurnsModel.model_validate(model_dict)
+    
     def extract_burns_data(self, filename: str) -> tuple[BurnsModel, str]:
         """
         Extract burn information from a markdown file using Gemini AI.
@@ -241,7 +283,8 @@ class BurnsExtracter:
                 "config": generation_config,
                 
             }
-
+            # print the model name
+            self.console.print(f"[blue]Using model: {self.model_name}[/blue]")
             response = self.client.models.generate_content(
                 model=self.model_name,
                 **request
@@ -290,8 +333,9 @@ class BurnsExtracter:
                     ))
                     raise ValueError(f"Invalid JSON from API: {str(e)}")
                 
-                # Create BurnsModel instance
+                # Create BurnsModel instance and deduplicate burns
                 burns_model = BurnsModel.model_validate(data)
+                burns_model = self._deduplicate_burns(burns_model)
                 
                 self.console.print("[green]Successfully extracted burn information[/green]")
                 
