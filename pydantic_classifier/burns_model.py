@@ -46,14 +46,7 @@ class BurnInjury(BaseModel):
     depth: BurnDepth = Field(description="Depth of the burn injury.")
     circumferencial: Optional[bool] = Field(description="Indicates if the burn encircles the body part completely.")
 
-    @field_validator("laterality")
-    def validate_laterality(cls, value):
-        if value is None:
-            return value
-        allowed_values = ["left", "right", "bilateral", "unspecified"]
-        if value not in allowed_values:
-            raise ValueError(f"Laterality must be one of: {', '.join(allowed_values)}")
-        return value
+    
 
 class BurnsModel(BaseModel):
     """
