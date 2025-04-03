@@ -30,8 +30,8 @@ async def get_burns(
     Retrieve burns records with optional filtering and pagination.
     
     Args:
-        ID (Optional[str]): Filter by patient burns identifier
-        skip (int): Number of records to skip
+        ID (Optional[str]): Filter by patient burns identifier (optional filter)
+        skip (int): Number of records to skip for pagination
         limit (int): Maximum number of records to return
         
     Returns:
@@ -41,18 +41,16 @@ async def get_burns(
         HTTPException: If there's an error during the retrieval process
     """
     try:
-        # If ID is provided, retrieve by ID
+        # If ID is provided, filter by ID
         if ID:
-            burn = await BurnsService.get_burn_by_id(ID)
-            if burn:
-                # Return as a list with a single item for consistency
-                return JSONResponse(content=[burn])
-            else:
-                return JSONResponse(content=[])
+            # Use the get_burns_by_filters method to filter by ID
+            filters = {"ID": ID}
+            result = await BurnsService.get_burns_by_filters(filters, skip, limit)
         else:
-            # No filters provided, return all burns with pagination
+            # No ID filter provided, return all burns with pagination
             result = await BurnsService.get_all_burns(skip, limit)
-            return JSONResponse(content=result)
+        
+        return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving burns records: {str(e)}")
 

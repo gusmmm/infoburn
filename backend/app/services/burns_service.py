@@ -226,8 +226,19 @@ class BurnsService:
             # Debug output
             print(f"Found {len(documents)} documents")
             
-            # Apply serialization to handle ObjectId fields
-            serialized_docs = BurnsService._serialize_documents(documents)
+            # Manually serialize each document instead of using _serialize_documents
+            serialized_docs = []
+            for doc in documents:
+                # Convert the MongoDB document to a serializable dictionary
+                serializable_doc = {}
+                for key, value in doc.items():
+                    if key == "_id":
+                        serializable_doc[key] = str(value)
+                    else:
+                        serializable_doc[key] = value
+                
+                serialized_docs.append(serializable_doc)
+            
             return serialized_docs
         except Exception as e:
             print(f"Error in get_burns_by_filters: {e}")
