@@ -1,83 +1,97 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+"""
+Main application module for InfoBurn API.
+
+This module initializes and configures the FastAPI application.
+"""
+import logging
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from .routes import admissions
-from .config.database import db_connection
-from rich.console import Console
-from backend.app.routes import burns  # Add this import
+from fastapi.responses import JSONResponse
 
-console = Console()
+from .routes import router
+from .database import Database
+from .config.settings import get_settings
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Manages the lifespan of the FastAPI application.
-    Handles database connections setup and cleanup.
-    """
-    try:
-        console.print("[yellow]Starting up InfoBurn API...[/yellow]")
-        await db_connection.connect()
-        console.print("[green]InfoBurn API startup complete![/green]")
-        yield
-    finally:
-        console.print("[yellow]Shutting down InfoBurn API...[/yellow]")
-        await db_connection.close()
-        console.print("[green]InfoBurn API shutdown complete![/green]")
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("app.main")
 
-# Initialize FastAPI with enhanced metadata
+# Get application settings
+settings = get_settings()
+
+# Create FastAPI app
 app = FastAPI(
     title="InfoBurn API",
-    description="""
-    🏥 Burns Critical Care Unit Information System API
-    
-    This API provides endpoints for managing patient admissions and clinical data 
-    in a burns critical care unit setting.
-    
-    ## Features
-    * 📋 Patient admission data
-    * 📊 Admission metrics
-    * 📍 Burn data
-    * 📝 Clinical data
-    
-    ## Authentication
-    All endpoints require appropriate authentication credentials.
-    """,
-    version="1.0.0",
-    lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc"
+    version="0.1.0",
+    description="API for Burns Critical Care Unit Information System",
 )
 
-# Add CORS middleware
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["*"],  # Allows all origins
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
-# Root endpoint
-@app.get("/", tags=["System"])
-async def root():
-    """
-    Root endpoint providing API status and version information.
-    """
+# Include API router
+app.include_router(router)
+
+@app.on_event("startup")
+async def startup_db_client():
+    """Initialize database connection on startup."""
+    logger.info("Starting up InfoBurn API...")
+    print("Starting up InfoBurn API...")
+    
+    # Fix: Use proper MongoDB connection URL format
+    mongodb_url = settings.MONGODB_URL
+    if not mongodb_url.endswith(settings.DATABASE_NAME) and "?" not in mongodb_url:
+        if not mongodb_url.endswith("/"):
+            mongodb_url += "/"
+        mongodb_url += settings.DATABASE_NAME
+    
+    db = await Database.connect_to_database(mongodb_url, settings.DATABASE_NAME)
+    app.state.db = db
+    logger.info(f"Connected to MongoDB database: {settings.DATABASE_NAME}")
+    print(f"Connected to MongoDB database: {settings.DATABASE_NAME}")
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    """Close database connection on shutdown."""
+    logger.info("Shutting down InfoBurn API...")
+    print("Shutting down InfoBurn API...")
+    if hasattr(app.state, "db") and app.state.db is not None:
+        await Database.close_database_connection(app.state.db)
+        logger.info("Database connection closed")
+        print("Database connection closed")
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler for the API"""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
-        status_code=200,
-        content={
-            "status": "operational",
-            "service": "InfoBurn API",
-            "version": "1.0.0",
-            "docs": "/docs",
-            "redoc": "/redoc"
-        }
+        status_code=500,
+        content={"detail": f"Internal server error: {str(exc)}"}
     )
 
-# Include routers
-app.include_router(admissions.router)
-app.include_router(burns.router)  # Add this line
+@app.get("/", tags=["Root"])
+async def read_root():
+    """Root endpoint returning API information."""
+    return {
+        "message": f"Welcome to InfoBurn API v0.1.0",
+        "status": "operational",
+        "documentation": "/docs",
+        "collections": ["admission_data", "burns"]
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy"}
 
 if __name__ == "__main__":
     import uvicorn

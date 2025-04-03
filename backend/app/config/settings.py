@@ -1,5 +1,23 @@
+"""
+Application settings module for InfoBurn API.
+
+This module contains all configuration settings for the InfoBurn application.
+"""
+import os
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+# Load environment variables from .env file
+load_dotenv()
+
+# API Settings
+API_VERSION = "0.1.0"
+APP_NAME = "InfoBurn API"
+
+# MongoDB Settings
+MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+DB_NAME = os.getenv("DB_NAME", "infoburn")
 
 class Settings(BaseSettings):
     """

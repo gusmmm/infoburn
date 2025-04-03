@@ -1,5 +1,5 @@
-from datetime import date
-from typing import Optional
+from datetime import date, datetime
+from typing import Optional, List
 from pydantic import Field, field_validator, model_validator, ConfigDict
 from enum import Enum
 import re
@@ -63,6 +63,38 @@ class AdmissionCreate(AdmissionBase):
     """Schema for creating new admissions"""
     pass
 
+class AdmissionUpdate(InfoBurnBaseModel):
+    """
+    Model for updating an existing admission record.
+    
+    This model defines fields that can be updated in an existing admission record.
+    All fields are optional since an update may only modify specific fields.
+    """
+    processo: Optional[int] = Field(None, description="Patient file number")
+    nome: Optional[str] = Field(None, description="Full name of the patient")
+    data_ent: Optional[date] = Field(None, description="Date of admission")
+    data_alta: Optional[date] = Field(None, description="Release date")
+    sexo: Optional[Gender] = Field(None, description="Patient gender (M or F)")
+    data_nasc: Optional[date] = Field(None, description="Patient's birth date")
+    destino: Optional[str] = Field(None, description="Discharge destination")
+    origem: Optional[str] = Field(None, description="Origin facility/location")
+    
+    # Reference to related records
+    burns: Optional[str] = Field(None, description="Reference to related burns record")
+    
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        validate_assignment=True,
+        json_schema_extra = {
+            "example": {
+                "data_alta": "2023-05-15",
+                "destino": "Home",
+                "burns": "507f1f77bcf86cd799439011"
+            }
+        }
+    )
+
 class AdmissionResponse(AdmissionBase):
     """Schema for responses including the MongoDB ID"""
     id: PyObjectId = Field(alias='_id')
+    burns: Optional[str] = Field(None, description="Reference to related burns record")

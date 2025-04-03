@@ -53,6 +53,7 @@ flowchart TD
    - Document-based storage
    - Flexible schema design
    - Efficient querying
+   - sync using pymongo
 
 2. JSON Management
    - Standardized format

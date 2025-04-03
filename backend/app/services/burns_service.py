@@ -12,6 +12,7 @@ from bson.json_util import dumps, loads
 
 from backend.app.config.database import db_connection
 from backend.app.models.burns import BurnsPatientData
+from backend.app.models.burns_responses import BurnsPatientResponse, BurnsStatisticsResponse
 
 
 class JSONEncoder(json.JSONEncoder):
@@ -28,7 +29,7 @@ class BurnsService:
     @staticmethod
     def _serialize_document(doc: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Serialize MongoDB document to convert ObjectId to string.
+        Serialize MongoDB document to convert ObjectId to string and rename _id to id.
         
         Args:
             doc (Dict[str, Any]): MongoDB document
@@ -42,7 +43,14 @@ class BurnsService:
         # Use json_util.dumps which handles MongoDB specific types
         json_str = dumps(doc)
         # Parse the JSON string back to a Python dict
-        return loads(json_str)
+        serialized_doc = loads(json_str)
+        
+        # Rename _id to id for Pydantic compatibility
+        if '_id' in serialized_doc:
+            serialized_doc['id'] = serialized_doc['_id']
+            del serialized_doc['_id']
+            
+        return serialized_doc
     
     @staticmethod
     def _serialize_documents(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -60,7 +68,7 @@ class BurnsService:
         return [BurnsService._serialize_document(doc) for doc in docs]
     
     @staticmethod
-    async def get_all_burns(skip: int = 0, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_all_burns(skip: int = 0, limit: int = 100) -> List[Dict[str, Any]]:
         """
         Retrieve all burns records with pagination.
         
@@ -72,15 +80,17 @@ class BurnsService:
             List[Dict[str, Any]]: List of burns records
         """
         try:
-            cursor = db_connection.db.burns.find().skip(skip).limit(limit)
-            documents = await cursor.to_list(length=limit)
+            if not db_connection.connect():
+                return []
+                
+            documents = list(db_connection.db.burns.find().skip(skip).limit(limit))
             return BurnsService._serialize_documents(documents)
         except Exception as e:
             print(f"Error in get_all_burns: {e}")
             return []
     
     @staticmethod
-    async def get_burn_by_id(burn_id: str) -> Optional[Dict[str, Any]]:
+    def get_burn_by_id(burn_id: str) -> Optional[Dict[str, Any]]:
         """
         Retrieve a burn record by ID.
         
@@ -91,25 +101,49 @@ class BurnsService:
             Optional[Dict[str, Any]]: The burn record if found, None otherwise
         """
         try:
-            doc = await db_connection.db.burns.find_one({"ID": burn_id})
+            if not db_connection.connect():
+                return None
+                
+            doc = db_connection.db.burns.find_one({"ID": burn_id})
             if doc is None:
                 return None
                 
-            # Convert the MongoDB document to a serializable dictionary
-            serializable_doc = {}
-            for key, value in doc.items():
-                if key == "_id":
-                    serializable_doc[key] = str(value)
-                else:
-                    serializable_doc[key] = value
-                    
-            return serializable_doc
+            # Use the serialization method that handles _id to id conversion
+            return BurnsService._serialize_document(doc)
         except Exception as e:
             print(f"Error in get_burn_by_id: {e}")
             return None
     
     @staticmethod
-    async def create_burn(burn_data: BurnsPatientData) -> str:
+    def get_burn_by_id_sync(burn_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Synchronous version of get_burn_by_id.
+        Retrieve a burn record by ID.
+        
+        Args:
+            burn_id (str): The ID of the burn record
+            
+        Returns:
+            Optional[Dict[str, Any]]: The burn record if found, None otherwise
+        """
+        try:
+            if not db_connection.connect():
+                return None
+                
+            doc = db_connection.db.burns.find_one({"ID": burn_id})
+            if doc is None:
+                return None
+                
+            # Use the serialization method that handles _id to id conversion
+            return BurnsService._serialize_document(doc)
+        except Exception as e:
+            print(f"Error in get_burn_by_id_sync: {e}")
+            return None
+        finally:
+            db_connection.close()
+    
+    @staticmethod
+    def create_burn(burn_data: BurnsPatientData) -> str:
         """
         Create a new burn record.
         
@@ -122,21 +156,29 @@ class BurnsService:
         Raises:
             ValueError: If a record with the same ID already exists
         """
-        # Check if a record with the same ID already exists
-        existing_record = await db_connection.db.burns.find_one({"ID": burn_data.ID})
-        if existing_record:
-            raise ValueError(f"A burn record with ID {burn_data.ID} already exists")
-        
-        # Convert to dict and add timestamp
-        data = burn_data.model_dump(exclude_none=True)
-        data["created_at"] = datetime.now()
-        data["updated_at"] = datetime.now()
-        
-        result = await db_connection.db.burns.insert_one(data)
-        return burn_data.ID
+        try:
+            if not db_connection.connect():
+                raise ValueError("Failed to connect to database")
+                
+            # Check if a record with the same ID already exists
+            existing_record = db_connection.db.burns.find_one({"ID": burn_data.ID})
+            if existing_record:
+                raise ValueError(f"A burn record with ID {burn_data.ID} already exists")
+            
+            # Convert to dict and add timestamp
+            data = burn_data.model_dump(exclude_none=True)
+            data["created_at"] = datetime.now()
+            data["updated_at"] = datetime.now()
+            
+            result = db_connection.db.burns.insert_one(data)
+            return burn_data.ID
+            
+        except Exception as e:
+            print(f"Error in create_burn: {e}")
+            raise
     
     @staticmethod
-    async def update_burn(burn_id: str, burn_data: Dict[str, Any]) -> bool:
+    def update_burn(burn_id: str, burn_data: Dict[str, Any]) -> bool:
         """
         Update an existing burn record.
         
@@ -147,18 +189,26 @@ class BurnsService:
         Returns:
             bool: True if the update was successful, False otherwise
         """
-        # Add updated timestamp
-        burn_data["updated_at"] = datetime.now()
-        
-        result = await db_connection.db.burns.update_one(
-            {"ID": burn_id},
-            {"$set": burn_data}
-        )
-        
-        return result.modified_count > 0
+        try:
+            if not db_connection.connect():
+                return False
+                
+            # Add updated timestamp
+            burn_data["updated_at"] = datetime.now()
+            
+            result = db_connection.db.burns.update_one(
+                {"ID": burn_id},
+                {"$set": burn_data}
+            )
+            
+            return result.modified_count > 0
+            
+        except Exception as e:
+            print(f"Error in update_burn: {e}")
+            return False
     
     @staticmethod
-    async def delete_burn(burn_id: str) -> bool:
+    def delete_burn(burn_id: str) -> bool:
         """
         Delete a burn record.
         
@@ -168,43 +218,92 @@ class BurnsService:
         Returns:
             bool: True if the deletion was successful, False otherwise
         """
-        result = await db_connection.db.burns.delete_one({"ID": burn_id})
-        return result.deleted_count > 0
+        try:
+            if not db_connection.connect():
+                return False
+                
+            result = db_connection.db.burns.delete_one({"ID": burn_id})
+            return result.deleted_count > 0
+            
+        except Exception as e:
+            print(f"Error in delete_burn: {e}")
+            return False
     
     @staticmethod
-    async def get_statistics() -> Dict[str, Any]:
+    def get_statistics() -> Dict[str, Any]:
         """
         Get statistics about burns data.
         
         Returns:
             Dict[str, Any]: Statistical information about burns data
         """
-        pipeline = [
-            {
-                "$facet": {
-                    "total_count": [{"$count": "count"}],
-                    "mechanism_stats": [
-                        {"$group": {"_id": "$mechanism", "count": {"$sum": 1}}},
-                        {"$sort": {"count": -1}}
-                    ],
-                    "accident_type_stats": [
-                        {"$group": {"_id": "$type_of_accident", "count": {"$sum": 1}}},
-                        {"$sort": {"count": -1}}
-                    ],
-                    "avg_tbsa": [{"$group": {"_id": None, "avg": {"$avg": "$tbsa"}}}]
-                }
-            }
-        ]
-        
         try:
-            result = await db_connection.db.burns.aggregate(pipeline).to_list(length=1)
-            return BurnsService._serialize_document(result[0] if result else {})
+            if not db_connection.connect():
+                return {}
+                
+            pipeline = [
+                {
+                    "$facet": {
+                        "total_count": [{"$count": "count"}],
+                        "mechanism_stats": [
+                            {"$group": {"_id": "$mechanism", "count": {"$sum": 1}}},
+                            {"$sort": {"count": -1}}
+                        ],
+                        "accident_type_stats": [
+                            {"$group": {"_id": "$type_of_accident", "count": {"$sum": 1}}},
+                            {"$sort": {"count": -1}}
+                        ],
+                        "avg_tbsa": [{"$group": {"_id": None, "avg": {"$avg": "$tbsa"}}}]
+                    }
+                }
+            ]
+            
+            result = list(db_connection.db.burns.aggregate(pipeline))
+            
+            # Process stats to create a proper BurnsStatisticsResponse
+            raw_stats = BurnsService._serialize_document(result[0] if result else {})
+            
+            # Extract and format stats according to response model
+            stats = {
+                "total_count": raw_stats.get("total_count", [{}])[0].get("count", 0) if raw_stats.get("total_count") else 0,
+                "mechanism_distribution": {},
+                "accident_type_distribution": {},
+                "violence_count": 0  # Default value
+            }
+            
+            # Process mechanism stats
+            if "mechanism_stats" in raw_stats:
+                for item in raw_stats["mechanism_stats"]:
+                    if item["_id"]:  # Skip null/None values
+                        stats["mechanism_distribution"][item["_id"]] = item["count"]
+            
+            # Process accident type stats
+            if "accident_type_stats" in raw_stats:
+                for item in raw_stats["accident_type_stats"]:
+                    if item["_id"]:  # Skip null/None values
+                        stats["accident_type_distribution"][item["_id"]] = item["count"]
+            
+            # Process average TBSA
+            if "avg_tbsa" in raw_stats and raw_stats["avg_tbsa"]:
+                stats["average_tbsa"] = raw_stats["avg_tbsa"][0].get("avg") if raw_stats["avg_tbsa"] else None
+            
+            # Calculate domestic accident percentage
+            if "domestic" in stats["accident_type_distribution"] and stats["total_count"] > 0:
+                domestic_count = stats["accident_type_distribution"]["domestic"]
+                stats["domestic_accident_percentage"] = (domestic_count / stats["total_count"]) * 100
+            
+            # Count violence cases
+            if "violence" in raw_stats:
+                stats["violence_count"] = raw_stats["violence"].count(True) if isinstance(raw_stats["violence"], list) else 0
+            
+            return stats
+            
         except Exception as e:
             print(f"Error in get_statistics: {e}")
             return {}
     
     @staticmethod
-    async def get_burns_by_filters(filters: Dict[str, Any], skip: int = 0, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_burns_by_filters(filters: Dict[str, Any], skip: int = 0, limit: int = 100) -> List[Dict[str, Any]]:
         """
         Retrieve burns records that match the specified filters with pagination.
         
@@ -217,6 +316,9 @@ class BurnsService:
             List[Dict[str, Any]]: List of burns records matching the filters
         """
         try:
+            if not db_connection.connect():
+                return []
+                
             # Handle special case for MongoDB _id if it's a string
             if "_id" in filters and isinstance(filters["_id"], str):
                 try:
@@ -228,26 +330,13 @@ class BurnsService:
             # Debug output
             print(f"Applying filters: {filters}")
             
-            cursor = db_connection.db.burns.find(filters).skip(skip).limit(limit)
-            documents = await cursor.to_list(length=limit)
+            documents = list(db_connection.db.burns.find(filters).skip(skip).limit(limit))
             
             # Debug output
             print(f"Found {len(documents)} documents")
             
-            # Manually serialize each document instead of using _serialize_documents
-            serialized_docs = []
-            for doc in documents:
-                # Convert the MongoDB document to a serializable dictionary
-                serializable_doc = {}
-                for key, value in doc.items():
-                    if key == "_id":
-                        serializable_doc[key] = str(value)
-                    else:
-                        serializable_doc[key] = value
-                
-                serialized_docs.append(serializable_doc)
+            return BurnsService._serialize_documents(documents)
             
-            return serialized_docs
         except Exception as e:
             print(f"Error in get_burns_by_filters: {e}")
             return []

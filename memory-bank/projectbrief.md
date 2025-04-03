@@ -51,3 +51,4 @@ A full-stack information system designed to manage and process medical data for 
 - pydantic-ai
 - fastapi
 - Google Gen AI SDK
+- pymongo

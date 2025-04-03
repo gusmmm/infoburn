@@ -1,18 +1,16 @@
 """
-Burns Model
+Database models for burns data.
 
-This module defines the Pydantic models for burns data in the application.
+This module contains the MongoDB data models for burns data,
+matching the Pydantic models used for validation.
 """
-
-from enum import Enum
+from pydantic import BaseModel, Field
 from typing import List, Optional
-from pydantic import Field
-
-from backend.app.models.base import InfoBurnBaseModel
+from enum import Enum
 
 
 class BurnMechanism(str, Enum):
-    """Possible mechanisms of burn injuries"""
+    """Enumeration of burn mechanisms"""
     HEAT = "Heat"
     ELECTRICAL = "Electrical discharge"
     FRICTION = "Friction"
@@ -22,14 +20,14 @@ class BurnMechanism(str, Enum):
 
 
 class AccidentType(str, Enum):
-    """Types of accidents causing the burns"""
+    """Enumeration of accident types"""
     DOMESTIC = "domestic"
     WORKPLACE = "workplace"
     OTHER = "other"
 
 
 class BurnLocation(str, Enum):
-    """Possible locations of burn injuries on body"""
+    """Enumeration of burn locations on the body"""
     HEAD = "head"
     NECK = "neck"
     FACE = "face"
@@ -45,7 +43,7 @@ class BurnLocation(str, Enum):
 
 
 class BurnDepth(str, Enum):
-    """Classification of burn depths"""
+    """Enumeration of burn depth classifications"""
     FIRST_DEGREE = "1st_degree"
     SECOND_DEGREE_PARTIAL = "2nd_degree_partial"
     SECOND_DEGREE_FULL = "2nd_degree_full"
@@ -55,33 +53,66 @@ class BurnDepth(str, Enum):
 
 
 class Laterality(str, Enum):
-    """Directional specification for burns"""
+    """Enumeration of body laterality"""
     LEFT = "left"
     RIGHT = "right"
     BILATERAL = "bilateral"
     UNSPECIFIED = "unspecified"
 
 
-class BurnInjury(InfoBurnBaseModel):
-    """Model for individual burn injuries"""
-    location: BurnLocation
-    laterality: Laterality
-    depth: BurnDepth
-    circumferencial: bool = False
+class BurnInjury(BaseModel):
+    """
+    Model for individual burn injuries with location, laterality, depth and circumferential status.
+    """
+    location: BurnLocation = Field(description="Anatomical location of the burn")
+    laterality: Laterality = Field(description="Side of the body affected by the burn")
+    depth: BurnDepth = Field(description="Depth of the burn injury")
+    circumferencial: bool = Field(description="Indicates if the burn encircles the body part completely")
 
 
-class BurnsPatientData(InfoBurnBaseModel):
-    """Model for burns patient data"""
-    ID: str = Field(description="Unique identifier for the patient")
-    tbsa: Optional[float] = Field(None, description="Total Body Surface Area affected by burns in percentage")
-    mechanism: Optional[BurnMechanism] = Field(None, description="Mechanism of burn injuries")
-    type_of_accident: Optional[AccidentType] = Field(None, description="Type of accident")
-    agent: Optional[str] = Field(None, description="The specific agent causing the burn")
-    wildfire: bool = Field(False, description="Indicates if burn was caused by a wildfire")
-    bonfire: bool = Field(False, description="Indicates if burn injuries are related to a bonfire")
-    fireplace: bool = Field(False, description="Indicates if burn injuries are related to a domestic fireplace")
-    violence: bool = Field(False, description="Indicates if burn was inflicted in a violence context")
-    suicide_attempt: bool = Field(False, description="Indicates if burn was result of a suicide attempt")
-    escharotomy: bool = Field(False, description="Indicates if escharotomy was performed")
-    associated_trauma: Optional[List[str]] = Field(None, description="List of associated traumas")
-    burns: Optional[List[BurnInjury]] = Field(None, description="List of individual burn injuries")
+class BurnsModel(BaseModel):
+    """
+    Database model for burns data.
+    Corresponds to the 'burns' collection in MongoDB.
+    """
+    ID: str = Field(description="Patient admission identifier (4-5 digits) linking to admission_data")
+    tbsa: float = Field(description="Total Body Surface Area affected by burns in percentage")
+    mechanism: BurnMechanism = Field(description="Mechanism of burn injuries")
+    type_of_accident: AccidentType = Field(description="Type of accident: domestic, workplace, or other")
+    agent: str = Field(description="The specific agent that caused the burn injury")
+    wildfire: bool = Field(description="Indicates if the burn was caused by a wildfire")
+    bonfire: bool = Field(description="Indicates if the burn injuries are related to a bonfire or a camp fire")
+    fireplace: bool = Field(description="Indicates if the burn injuries are related to a domestic fireplace")
+    violence: bool = Field(description="Indicates if the burn was inflicted in a violence context")
+    suicide_attempt: bool = Field(description="Indicates if the burn was specifically described as a suicide attempt")
+    escharotomy: bool = Field(description="Indicates if the patient underwent emergency escharotomy")
+    associated_trauma: List[str] = Field(description="List of trauma lesions associated with the burn injuries")
+    burns: List[BurnInjury] = Field(description="Detailed information about individual burn injuries")
+
+    class Config:
+        """Configuration for the BurnsModel"""
+        collection = "burns"
+        schema_extra = {
+            "example": {
+                "ID": "12345",
+                "tbsa": 25.5,
+                "mechanism": "Heat",
+                "type_of_accident": "domestic",
+                "agent": "hot water",
+                "wildfire": False,
+                "bonfire": False,
+                "fireplace": False,
+                "violence": False,
+                "suicide_attempt": False,
+                "escharotomy": False,
+                "associated_trauma": ["fracture", "concussion"],
+                "burns": [
+                    {
+                        "location": "hand",
+                        "laterality": "right",
+                        "depth": "2nd_degree_partial",
+                        "circumferencial": False
+                    }
+                ]
+            }
+        }
