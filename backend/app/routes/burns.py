@@ -87,16 +87,23 @@ async def create_burn(burn_data: BurnsPatientData):
         Dict[str, Any]: The created burn record
         
     Raises:
-        HTTPException: If the burn record could not be created
+        HTTPException: If the burn record could not be created or already exists
     """
-    burn_id = await BurnsService.create_burn(burn_data)
-    
-    # Return the created record
-    created_burn = await BurnsService.get_burn_by_id(burn_id)
-    if not created_burn:
-        raise HTTPException(status_code=500, detail="Failed to create burn record")
+    try:
+        burn_id = await BurnsService.create_burn(burn_data)
         
-    return JSONResponse(content=created_burn)
+        # Return the created record
+        created_burn = await BurnsService.get_burn_by_id(burn_id)
+        if not created_burn:
+            raise HTTPException(status_code=500, detail="Failed to create burn record")
+            
+        return JSONResponse(content=created_burn)
+    except ValueError as e:
+        # Handle the case when a record with the same ID already exists
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        # Handle other errors
+        raise HTTPException(status_code=500, detail=f"Error creating burn record: {str(e)}")
 
 
 @router.put("/{burn_id}")

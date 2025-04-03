@@ -118,7 +118,15 @@ class BurnsService:
             
         Returns:
             str: The ID of the created record
+            
+        Raises:
+            ValueError: If a record with the same ID already exists
         """
+        # Check if a record with the same ID already exists
+        existing_record = await db_connection.db.burns.find_one({"ID": burn_data.ID})
+        if existing_record:
+            raise ValueError(f"A burn record with ID {burn_data.ID} already exists")
+        
         # Convert to dict and add timestamp
         data = burn_data.model_dump(exclude_none=True)
         data["created_at"] = datetime.now()

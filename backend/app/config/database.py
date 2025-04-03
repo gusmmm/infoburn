@@ -16,11 +16,10 @@ class DatabaseConnection:
     async def connect(self):
         """Connect to MongoDB and setup database"""
         try:
-            self.client = AsyncIOMotorClient(self.settings.MONGODB_URL)
-            self.db = self.client[self.settings.DATABASE_NAME]
-            
-            # Create unique index on ID field
-            await self.db.admission_data.create_index("ID", unique=True)
+            if self.client is None:
+                self.client = AsyncIOMotorClient(self.settings.MONGODB_URL)
+                self.db = self.client[self.settings.DATABASE_NAME]
+                await self.setup_indexes()  # Set up indexes after connecting
             
             # Test connection
             await self.client.admin.command('ping')
@@ -29,6 +28,19 @@ class DatabaseConnection:
             console.print(f"[red]Failed to connect to MongoDB: {str(e)}[/red]")
             raise
     
+    async def setup_indexes(self):
+        """Set up database indexes for performance and constraints"""
+        try:
+            # Create unique index on burns.ID
+            await self.db.burns.create_index("ID", unique=True)
+            
+            # Create unique index on admission_data.ID
+            await self.db.admission_data.create_index("ID", unique=True)
+            
+            # Add other indexes as needed
+        except Exception as e:
+            print(f"Error setting up database indexes: {e}")
+
     async def close(self):
         """Close database connection"""
         if self.client:
