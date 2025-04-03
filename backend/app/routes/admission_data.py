@@ -4,7 +4,7 @@ API routes for admission data operations.
 This module contains all FastAPI routes for the admission data collection.
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 from datetime import date
@@ -202,7 +202,8 @@ async def delete_admission_data(
                 detail=f"Admission data with ID {patient_id} not found"
             )
             
-        return JSONResponse(status_code=204, content={})
+        #return JSONResponse(status_code=204, content={})
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
     except Exception as e:

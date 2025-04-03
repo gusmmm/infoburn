@@ -4,7 +4,7 @@ API routes for burns data operations.
 This module contains all FastAPI routes for the burns collection.
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -207,7 +207,8 @@ async def delete_burns_data(
                 detail=f"Burns data for patient ID {patient_id} not found"
             )
             
-        return JSONResponse(status_code=204, content={})
+        #return JSONResponse(status_code=204, content={})
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
     except Exception as e:
