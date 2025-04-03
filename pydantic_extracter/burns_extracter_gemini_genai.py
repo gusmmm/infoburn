@@ -106,8 +106,7 @@ class BurnsExtracter:
             "Medical Text:\n"
             f"{text}\n\n"
             "Provide a complete and accurate extraction. If information is not explicitly mentioned in the text, "
-            "use null for the fields and do not try to guess or give an opinion. "
-            "For boolean fields, only include them if you can determine their value from the text.\n\n"
+            "or is missing in the text. use null for the result of the fields according to type and do not try to guess or give an opinion. "
             "IMPORTANT: Ensure the JSON response is complete and properly formatted. "
             "Do not truncate or leave any objects incomplete."
         )

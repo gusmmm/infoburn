@@ -37,14 +37,20 @@ class BurnDepth(str, Enum):
     FOURTH_DEGREE = "4th_degree"
     UNSPECIFIED = "unspecified"
 
+class Laterality(str, Enum):
+    LEFT = "left"
+    RIGHT = "right"
+    BILATERAL = "bilateral"
+    UNSPECIFIED = "unspecified"
+
 class BurnInjury(BaseModel):
     """
     Model for individual burn injuries with location, laterality, depth and circumferential status.
     """
     location: BurnLocation
-    laterality: Optional[str] = Field(description="Side of the body affected by the burn.")
+    laterality: Laterality = Field(description="Side of the body affected by the burn.")
     depth: BurnDepth = Field(description="Depth of the burn injury.")
-    circumferencial: Optional[bool] = Field(description="Indicates if the burn encircles the body part completely.")
+    circumferencial: bool = Field(description="Indicates if the burn encircles the body part completely.")
 
     
 
@@ -52,18 +58,18 @@ class BurnsModel(BaseModel):
     """
     Base model for burns data.
     """
-    tbsa: Optional[float] = Field(description="Total Body Surface Area affected by burns in percentage.")
-    mechanism: Optional[BurnMechanism] = Field(description="Mechanism of burn injuries.")
-    type_of_accident: Optional[AccidentType] = Field(description="Type of accident: domestic, workplace, or other.")
-    agent: Optional[str] = Field(description="The specific agent that caused the burn injury (e.g., fire, gas, petrol, chemical name).")
-    wildfire: Optional[bool] = Field(description="Indicates if the burn was caused by a wildfire (e.g., forest fire, bushfire, grass fire, hill fire, prairie fire).")
-    bonfire: Optional[bool] = Field(description="Indicates if the burn injuries are related to a bonfire or a camp fire.")
-    fireplace: Optional[bool] = Field(description="Indicates if the burn injuries are related to a domestic fireplace.")
-    violence: Optional[bool] = Field(description="Indicates if the burn was inflicted in a violence context.")
-    suicide_attempt: Optional[bool] = Field(description="Indicates if the burn was specifically described as a suicide attempt.")
-    escharotomy: Optional[bool] = Field(description="Indicates if the patient underwent emergency escharotomy.")
-    associated_trauma: Optional[List[str]] = Field(description="List of trauma lesions associated with the burn injuries.")
-    burns: Optional[List[BurnInjury]] = Field(description="Detailed information about individual burn injuries.")
+    tbsa: float = Field(description="Total Body Surface Area affected by burns in percentage.")
+    mechanism: BurnMechanism = Field(description="Mechanism of burn injuries.")
+    type_of_accident: AccidentType = Field(description="Type of accident: domestic, workplace, or other.")
+    agent: str = Field(description="The specific agent that caused the burn injury (e.g., fire, gas, petrol, chemical name).")
+    wildfire: bool = Field(description="Indicates if the burn was caused by a wildfire (e.g., forest fire, bushfire, grass fire, hill fire, prairie fire).")
+    bonfire: bool = Field(description="Indicates if the burn injuries are related to a bonfire or a camp fire.")
+    fireplace: bool = Field(description="Indicates if the burn injuries are related to a domestic fireplace.")
+    violence: bool = Field(description="Indicates if the burn was inflicted in a violence context.")
+    suicide_attempt: bool = Field(description="Indicates if the burn was specifically described as a suicide attempt.")
+    escharotomy: bool = Field(description="Indicates if the patient underwent emergency escharotomy.")
+    associated_trauma: List[str] = Field(description="List of trauma lesions associated with the burn injuries.")
+    burns: List[BurnInjury] = Field(description="Detailed information about individual burn injuries.")
 
     @field_validator("tbsa")
     def validate_tbsa(cls, value):
