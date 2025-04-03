@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routes import admissions
 from .config.database import db_connection
 from rich.console import Console
+from backend.app.routes import burns  # Add this import
 
 console = Console()
 
@@ -76,6 +77,7 @@ async def root():
 
 # Include routers
 app.include_router(admissions.router)
+app.include_router(burns.router)  # Add this line
 
 if __name__ == "__main__":
     import uvicorn
