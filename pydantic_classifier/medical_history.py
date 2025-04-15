@@ -141,7 +141,7 @@ class MedicalHistory(BaseModel):
     Comprehensive model for a patient's medical history including conditions,
     medications, and surgeries.
     """
-    conditions: List[Condition] = Field(
+    diseases: List[Disease] = Field(
         default_factory=list,
         description="List of previous pathologic conditions or diseases"
     )
