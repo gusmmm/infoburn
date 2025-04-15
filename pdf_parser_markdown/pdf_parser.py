@@ -14,9 +14,6 @@ Dependencies:
 - pathlib: For cross-platform path handling
 - logging: For error tracking and debugging
 - rich: For beautiful terminal output
-
-Author: [Your Name]
-Version: 2.0
 """
 
 import fitz  # PyMuPDF
