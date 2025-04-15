@@ -3,59 +3,113 @@ from typing import List, Optional
 from enum import Enum
 from datetime import date
 
-class Condition(BaseModel):
-    """
-    Model for representing a pathologic condition or disease from a patient's medical history.
-    """
+# This module defines models for representing a patient's medical history,
+# including conditions, medications, and surgeries.
+
+# class DieaseaseCategory(str, Enum)
+# This enum classifies various disease categories based on the ICD-11 classification.
+class DiseaseCategory(str, Enum):
+    INFECTIOUS = "Certain infectious or parasitic diseases"
+    NEOPLASMS = "Neoplasms"
+    BLOOD_DISORDERS = "Diseases of the blood or blood-forming organs"
+    IMMUNE_SYSTEM = "Diseases of the immune system"
+    ENDOCRINE_METABOLIC = "Endocrine, nutritional or metabolic diseases"
+    MENTAL_BEHAVIORAL = "Mental, behavioural or neurodevelopmental disorders"
+    SLEEP_DISORDERS = "Sleep-wake disorders"
+    NERVOUS_SYSTEM = "Diseases of the nervous system"
+    VISUAL_SYSTEM = "Diseases of the visual system"
+    EAR_DISORDERS = "Diseases of the ear or mastoid process"
+    CIRCULATORY_SYSTEM = "Diseases of the circulatory system"
+    RESPIRATORY_SYSTEM = "Diseases of the respiratory system"
+    DIGESTIVE_SYSTEM = "Diseases of the digestive system"
+    SKIN_DISORDERS = "Diseases of the skin"
+    MUSCULOSKELETAL = "Diseases of the musculoskeletal system or connective tissue"
+    GENITOURINARY = "Diseases of the genitourinary system"
+    SEXUAL_HEALTH = "Conditions related to sexual health"
+    PREGNANCY = "Pregnancy, childbirth or the puerperium"
+    PERINATAL = "Certain conditions originating in the perinatal period"
+    DEVELOPMENTAL = "Developmental anomalies"
+    SYMPTOMS_SIGNS = "Symptoms, signs or clinical findings, not elsewhere classified"
+    INJURY_POISONING = "Injury, poisoning or certain other consequences of external causes"
+    EXTERNAL_CAUSES = "External causes of morbidity or mortality"
+    HEALTH_FACTORS = "Factors influencing health status or contact with health services"
+    TRADITIONAL_MEDICINE = "Supplementary Chapter Traditional Medicine Conditions - Module I"
+
+# This class represents a disease or condition with its name and category.
+# It is used to classify diseases based on the ICD-11 classification.
+class Disease(BaseModel):
     name: str = Field(
-        description="Name of the condition or disease (e.g., 'Diabetes Mellitus', 'Hypertension')"
+        description="Name of the disease or condition (e.g., 'Diabetes Mellitus', 'Hypertension')"
     )
-    onset_year: int = Field(
-        description="Year when the condition was first diagnosed or began, if known"
-    )
-    duration_years: float = Field(
-        description="Duration of the condition in years, if specified instead of onset year"
+    category: DiseaseCategory = Field(
+        description="Category of the disease based on ICD-11 classification"
     )
     notes: str = Field(
         None,
         description="Additional details about the condition from the medical text"
     )
-    
-    @field_validator('onset_year')
-    def validate_onset_year(cls, v):
-        """Validate that onset year is reasonable"""
-        if v is not None and (v < 1900 or v > date.today().year):
-            raise ValueError(f"Onset year {v} is outside reasonable range")
-        return v
 
 class MedicationFrequency(str, Enum):
-    """Enumeration of common medication frequencies"""
-    ONCE_DAILY = "once_daily"
-    TWICE_DAILY = "twice_daily" 
-    THREE_TIMES_DAILY = "three_times_daily"
-    FOUR_TIMES_DAILY = "four_times_daily"
-    WEEKLY = "weekly"
-    AS_NEEDED = "as_needed"
-    OTHER = "other"
+    """Standard medication frequencies."""
+    QD = "Once daily"
+    BID = "Twice daily"
+    TID = "Three times daily"
+    QID = "Four times daily"
+    QHS = "At bedtime"
+    QOD = "Every other day"
+    QWK = "Once weekly"
+    PRN = "As needed"
+    OTHER = "Other (specify in frequency_other)"
+
+class SnomedConcept(BaseModel):
+    """
+    Represents a SNOMED-CT concept, including its unique identifier and
+    human-readable term. Essential for semantic interoperability.
+    """
+    sctid: str = Field(
+        description="The unique SNOMED CT Identifier (SCTID) for the concept. "
+                    "This is the primary key for interoperability.",
+        examples=["373873005"] # Example: SCTID for 'Angiotensin-converting enzyme inhibitor product'
+    )
+    term: str = Field(
+        description="The preferred human-readable description (term) associated "
+                    "with the SCTID.",
+        examples=["Angiotensin-converting enzyme inhibitor product"]
+    )
 
 class Medication(BaseModel):
     """
-    Model for representing a medication the patient was taking before admission.
+    Model for representing a medication the patient was taking before admission,
+    including SNOMED-CT classification for interoperability.
     """
     name: str = Field(
-        description="Name of the medication (e.g., 'Metformin', 'Lisinopril')"
+        description="Name of the medication (e.g., 'Metformin', 'Lisinopril'). "
+                    "This is typically the generic or brand name found in the text.",
+        examples=["Lisinopril"]
     )
     dosage: str = Field(
-        description="Dosage amount (e.g., '500mg', '10mg')"
+        description="Dosage amount and unit (e.g., '500mg', '10mg', '2 puffs').",
+        examples=["10mg"]
     )
     frequency: MedicationFrequency = Field(
-        description="How often the medication is taken"
+        description="How often the medication is taken, using predefined codes."
     )
+    # Made frequency_other, assuming it's only relevant if frequency is OTHER
     frequency_other: str = Field(
-        description="Description of frequency if not one of the standard options"
+        description="Description of frequency if 'Other' is selected in the frequency field."
     )
+    # Made notes , as they might not always be present
     notes: str = Field(
-        description="Additional details about the medication from the medical text"
+        description="Additional details or context about the medication extracted "
+                    "from the medical text (e.g., 'for hypertension', 'patient stopped 2 weeks ago')."
+    )
+    # --- NEW FIELD for SNOMED-CT Classification ---
+    snomed_classification: SnomedConcept = Field(
+        description="SNOMED-CT classification representing the primary therapeutic or "
+                    "pharmacological class of the medication (e.g., ACE inhibitor, Biguanide). "
+                    "This field links the specific medication name to a standardized clinical concept "
+                    "for categorization and interoperability. Use concepts representing classes, "
+                    "not the specific medication product itself unless necessary."
     )
 
 class Surgery(BaseModel):
