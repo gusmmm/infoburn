@@ -1,6 +1,6 @@
 import os
 import json
-import time # Import the time module
+import time
 from pathlib import Path
 from typing import List, Optional, Dict
 from enum import Enum
@@ -8,7 +8,10 @@ from enum import Enum
 from pydantic import BaseModel, Field, ValidationError
 from google import genai
 from google.genai import types
-from google.api_core import exceptions as google_exceptions # Import google exceptions
+from google.api_core import exceptions as google_exceptions
+
+# Import the SNOMED CT diagnosis lookup function
+from core_tools.diagnosis import find_diagnosis_snomed_code
 
 from dotenv import load_dotenv
 from rich.console import Console
@@ -19,6 +22,14 @@ load_dotenv()
 GEMINI_MODEL_NAME = "gemini-2.0-flash" # Use a more descriptive constant
 
 # --- Pydantic Models ---
+
+class SnomedConcept(BaseModel):
+    """
+    Represents a SNOMED-CT concept for standardized terminology.
+    """
+    sctid: str = Field(description="The unique SNOMED CT Identifier (SCTID).")
+    term: str = Field(description="The preferred human-readable term for the SCTID.")
+
 class DiseaseCategory(str, Enum):
     INFECTIOUS = "Certain infectious or parasitic diseases"
     NEOPLASMS = "Neoplasms"
@@ -45,14 +56,20 @@ class DiseaseCategory(str, Enum):
     EXTERNAL_CAUSES = "External causes of morbidity or mortality"
     HEALTH_FACTORS = "Factors influencing health status or contact with health services"
     TRADITIONAL_MEDICINE = "Supplementary Chapter Traditional Medicine Conditions - Module I"
-    UNKNOWN = "Unknown or Unspecified" # Added for robustness
+    UNKNOWN = "Unknown or Unspecified"
 
 class Disease(BaseModel):
-    name: str = Field(description="The name of the disease or condition.")
-    category: DiseaseCategory = Field(description="The category of the disease based on standard classifications.")
+    name: str = Field(description="The name of the disease or condition as extracted.")
+    category: DiseaseCategory = Field(
+        default=DiseaseCategory.UNKNOWN, # Default if Gemini doesn't provide it
+        description="The category of the disease based on standard classifications."
+    )
+    snomed_classification: Optional[SnomedConcept] = Field( # Added field
+        None, description="SNOMED-CT classification for the disease name."
+    )
 
 class PreviousMedicalHistory(BaseModel):
-    ID: str = Field(description="Patient identifier, derived from the source filename.") # Added ID field
+    ID: Optional[str] = Field(None, description="Patient identifier, derived from the source filename.") # Keep optional here, set in _save_json
     previous_diseases: List[Disease] = Field(description="A list of diseases or conditions the patient had prior to the current admission.")
 
 # --- Service Class ---
@@ -218,6 +235,56 @@ class MedicalHistoryExtractorService:
             self.console.print(f"[bold red]An unexpected error occurred during extraction: {e}[/bold red]")
             return None
 
+    def _enrich_diseases_with_snomed(self, diseases: List[Disease]) -> List[Disease]:
+        """
+        Enriches a list of Disease objects with SNOMED CT codes using find_diagnosis_snomed_code.
+
+        Args:
+            diseases: A list of Disease objects extracted initially.
+
+        Returns:
+            The same list of Disease objects, potentially updated with snomed_classification.
+        """
+        if not diseases:
+            return []
+
+        self.console.print(f"[cyan]Enriching {len(diseases)} diseases with SNOMED CT codes...[/cyan]")
+        enriched_diseases = []
+        for disease in diseases:
+            disease_name = disease.name
+            if not disease_name:
+                self.console.print("[yellow]Skipping disease with missing name during SNOMED enrichment.[/yellow]")
+                enriched_diseases.append(disease) # Keep the original disease object
+                continue
+
+            # self.console.print(f"  Looking up SNOMED code for: '{disease_name}'") # Verbose logging
+            snomed_result = None
+            try:
+                # Call the imported function
+                snomed_result = find_diagnosis_snomed_code(disease_name)
+            except Exception as e:
+                # Log errors from the lookup function itself
+                self.console.print(f"[red]Error during SNOMED lookup for '{disease_name}': {e}[/red]")
+
+            if snomed_result:
+                try:
+                    # Validate and create SnomedConcept
+                    snomed_concept = SnomedConcept.model_validate(snomed_result)
+                    disease.snomed_classification = snomed_concept # Assign to the disease object
+                    # self.console.print(f"    Found: {snomed_concept.term} ({snomed_concept.sctid})") # Verbose
+                except ValidationError as val_err:
+                    self.console.print(f"[yellow]Warning: SNOMED result for '{disease_name}' failed validation: {val_err}. Result: {snomed_result}[/yellow]")
+                    disease.snomed_classification = None # Ensure it's None if validation fails
+            else:
+                # self.console.print(f"    No valid SNOMED code found for '{disease_name}'") # Verbose
+                disease.snomed_classification = None # Ensure it's None if not found
+
+            enriched_diseases.append(disease)
+            # Add a small delay *within* the enrichment loop if calling an external API frequently
+            # time.sleep(0.5) # Example: Adjust delay as needed for the diagnosis lookup service
+
+        return enriched_diseases
+
     def _save_json(self, data: PreviousMedicalHistory, input_file_path: Path):
         """Saves the extracted data, including the file-derived ID, to a JSON file."""
         output_filename = input_file_path.stem + ".json"
@@ -265,37 +332,34 @@ class MedicalHistoryExtractorService:
             success_count = 0
             fail_count = 0
 
-            for i, file_path in enumerate(markdown_files): # Use enumerate for potential first-call skip
+            for i, file_path in enumerate(markdown_files):
                 progress.update(task, description=f"[cyan]Processing: {file_path.name}")
 
                 medical_text = self._read_file(file_path)
                 if medical_text is None:
-                    fail_count += 1
-                    progress.advance(task)
-                    continue # Skip to next file
+                    fail_count += 1; progress.advance(task); continue
 
+                # Step 1: Initial Extraction
                 extracted_data = self._extract_history(medical_text)
                 if extracted_data is None:
-                    self.console.print(f"[yellow]Failed to extract history for '{file_path.name}'. Skipping save.[/yellow]")
-                    fail_count += 1
-                    # No sleep needed if API call failed or was skipped internally
-                    progress.advance(task)
-                    continue # Skip saving if extraction failed
+                    self.console.print(f"[yellow]Failed initial extraction for '{file_path.name}'. Skipping.[/yellow]")
+                    fail_count += 1; progress.advance(task); continue
 
-                # Check if extraction actually found any diseases
-                if not extracted_data.previous_diseases:
-                     self.console.print(f"[cyan]No previous diseases found/extracted for '{file_path.name}'. Saving empty list.[/cyan]")
+                # Step 2: Enrichment
+                if extracted_data.previous_diseases:
+                    # Enrich the extracted diseases list in place
+                    extracted_data.previous_diseases = self._enrich_diseases_with_snomed(extracted_data.previous_diseases)
+                else:
+                     self.console.print(f"[cyan]No previous diseases found/extracted for '{file_path.name}'. Skipping enrichment.[/cyan]")
 
+                # Step 3: Save (includes ID addition)
                 self._save_json(extracted_data, file_path)
                 success_count += 1
                 progress.advance(task)
 
-                # --- Add Rate Limiting Delay ---
-                # Avoid sleeping after the very last file
+                # Rate Limiting Delay (for Gemini API calls)
                 if self.sleep_duration > 0 and i < len(markdown_files) - 1:
-                    # self.console.print(f"[dim]Waiting {self.sleep_duration:.2f}s before next API call...[/dim]") # Optional: uncomment for verbose logging
                     time.sleep(self.sleep_duration)
-                # -----------------------------
 
         self.console.print("-" * 30)
         self.console.print(f"[bold green]Processing complete.[/bold green]")
