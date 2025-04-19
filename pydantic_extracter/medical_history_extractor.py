@@ -1,8 +1,9 @@
 import os
 import json
 import time
+import re # Import regex module
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple # Added Tuple
 from enum import Enum
 
 from pydantic import BaseModel, Field, ValidationError
@@ -16,11 +17,13 @@ from core_tools.diagnosis import find_diagnosis_snomed_code
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+from rich.prompt import Prompt, IntPrompt, Confirm # Import rich prompts
 
 # --- Configuration ---
 load_dotenv()
-GEMINI_MODEL_NAME = "gemini-2.5-pro-preview-03-25" # Updated model name
-DEFAULT_GEMINI_RATE_LIMIT_RPM = 5 # Specific name for Gemini limit
+#GEMINI_MODEL_NAME = "gemini-2.5-pro-preview-03-25" # Updated model name
+GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-04-17"
+DEFAULT_GEMINI_RATE_LIMIT_RPM = 10 # Specific name for Gemini limit
 DEFAULT_SNOMED_RATE_LIMIT_RPM = 30 # Separate limit for SNOMED lookups (adjust as needed)
 
 # --- Pydantic Models ---
@@ -80,14 +83,14 @@ class PreviousMedicalHistory(BaseModel):
 class MedicalHistoryExtractorService:
     """
     Extracts previous medical history from markdown files using Google Gemini API
-    and enriches it with SNOMED CT codes.
+    and enriches it with SNOMED CT codes. Allows filtering files by ID range or year range.
     """
     def __init__(self,
                  input_dir: str,
                  output_dir: str,
                  glossary_path: str,
-                 gemini_rate_limit_rpm: int = DEFAULT_GEMINI_RATE_LIMIT_RPM, # Renamed parameter
-                 snomed_rate_limit_rpm: int = DEFAULT_SNOMED_RATE_LIMIT_RPM): # New parameter
+                 gemini_rate_limit_rpm: int = DEFAULT_GEMINI_RATE_LIMIT_RPM,
+                 snomed_rate_limit_rpm: int = DEFAULT_SNOMED_RATE_LIMIT_RPM):
         self.console = Console()
         try:
             self.api_key = self._load_api_key()
@@ -164,18 +167,82 @@ class MedicalHistoryExtractorService:
                 self.glossary_content = ""
         return self.glossary_content
 
-    def _get_markdown_files(self, limit: Optional[int] = None) -> List[Path]:
-        """Gets a list of markdown files from the input directory, optionally limited."""
+    def _get_markdown_files(self,
+                            limit: Optional[int] = None,
+                            file_id_range: Optional[Tuple[int, int]] = None,
+                            year_range: Optional[Tuple[int, int]] = None
+                           ) -> List[Path]:
+        """
+        Gets a list of markdown files from the input directory, applying optional filters.
+
+        Args:
+            limit: Maximum number of files to return (applied after other filters).
+            file_id_range: A tuple (start_id, end_id) to filter files by numeric stem ID.
+            year_range: A tuple (start_year, end_year) to filter files by year derived
+                        from the first two digits of the stem (e.g., 23 for 2023).
+
+        Returns:
+            A sorted list of filtered markdown file paths.
+        """
         if not self.input_dir.is_dir():
             self.console.print(f"[bold red]Error: Input directory '{self.input_dir}' not found or is not a directory.[/bold red]")
             return []
 
-        files = sorted(list(self.input_dir.glob("*.md"))) # Get sorted list
+        # Get all markdown files initially
+        all_files = sorted(list(self.input_dir.glob("*.md")))
+        files_to_process = all_files # Start with all files
+        filter_applied = False
 
+        # --- Apply File ID Range Filter ---
+        if file_id_range:
+            filter_applied = True
+            start_id, end_id = file_id_range
+            self.console.print(f"[blue]Filtering by File ID range: {start_id} to {end_id}[/blue]")
+            id_filtered_files = [] # Use a temporary list for this filter
+            for file_path in all_files: # Filter from the original full list
+                try:
+                    file_id = int(file_path.stem)
+                    if start_id <= file_id <= end_id:
+                        id_filtered_files.append(file_path)
+                except ValueError:
+                    self.console.print(f"[yellow]Warning: Could not parse file ID from '{file_path.name}'. Skipping for ID range filter.[/yellow]")
+            files_to_process = id_filtered_files # Update the list to process
+
+        # --- Apply Year Range Filter ---
+        # Only apply if ID range was NOT applied
+        elif year_range:
+            filter_applied = True
+            start_year, end_year = year_range
+            start_yy = start_year % 100
+            end_yy = end_year % 100
+            self.console.print(f"[blue]Filtering by Year range: {start_year} ({start_yy:02d}) to {end_year} ({end_yy:02d})[/blue]")
+            year_pattern = re.compile(r"^\d{2}")
+            year_filtered_files = [] # Use a temporary list for this filter
+            for file_path in all_files: # Filter from the original full list
+                match = year_pattern.match(file_path.stem)
+                if match:
+                    try:
+                        file_yy = int(match.group(0))
+                        if start_yy <= file_yy <= end_yy:
+                            year_filtered_files.append(file_path)
+                    except ValueError:
+                         self.console.print(f"[yellow]Warning: Could not parse year from '{file_path.name}'. Skipping for year range filter.[/yellow]")
+                else:
+                    self.console.print(f"[yellow]Warning: Filename '{file_path.name}' does not start with two digits. Skipping for year range filter.[/yellow]")
+            files_to_process = year_filtered_files # Update the list to process
+
+        # --- Apply Limit ---
+        # Apply limit to the result of filtering (or the full list if no filter applied)
         if limit is not None and limit > 0:
-            self.console.print(f"[yellow]Limiting processing to the first {limit} files.[/yellow]")
-            return files[:limit]
-        return files
+            if len(files_to_process) > limit:
+                self.console.print(f"[yellow]Limiting processing to the first {limit} files (after applying filters).[/yellow]")
+                return files_to_process[:limit]
+            # Only print limit message if no range filter was active but limit is set
+            elif not filter_applied:
+                 self.console.print(f"[yellow]Processing limit set to {limit} files.[/yellow]")
+                 # No need to slice if limit >= len(files_to_process)
+
+        return files_to_process # Return the correctly filtered (and potentially limited) list
 
     def _read_file(self, file_path: Path) -> Optional[str]:
         """Reads content from a single markdown file."""
@@ -218,9 +285,13 @@ class MedicalHistoryExtractorService:
                     temperature=0.1, # Slightly increased for potentially better extraction nuance
                     response_mime_type='application/json',
                     response_schema=PreviousMedicalHistory.model_json_schema(),
-                ),
-                # Add safety settings if needed, e.g., to block harmful content
-                # safety_settings={...}
+                    thinking_config=genai.types.ThinkingConfig(
+                        thinking_budget=4096
+                    ),
+
+                    # Add safety settings if needed, e.g., to block harmful content
+                    # safety_settings={...}
+                )
             )
 
             # Attempt to parse the JSON response using the Pydantic model
@@ -329,11 +400,23 @@ class MedicalHistoryExtractorService:
             self.console.print(f"[red]Unexpected error saving JSON '{output_path}': {e}[/red]")
 
 
-    def process_files(self, limit: Optional[int] = None):
-        """Processes markdown files: extracts history, enriches with SNOMED, saves JSON."""
-        markdown_files = self._get_markdown_files(limit=limit)
+    def process_files(self,
+                      limit: Optional[int] = None,
+                      file_id_range: Optional[Tuple[int, int]] = None,
+                      year_range: Optional[Tuple[int, int]] = None):
+        """
+        Processes markdown files based on specified filters: extracts history,
+        enriches with SNOMED, saves JSON.
+
+        Args:
+            limit: Maximum number of files to process.
+            file_id_range: A tuple (start_id, end_id) to filter files by numeric stem ID.
+            year_range: A tuple (start_year, end_year) to filter files by year derived
+                        from the first two digits of the stem.
+        """
+        markdown_files = self._get_markdown_files(limit=limit, file_id_range=file_id_range, year_range=year_range)
         if not markdown_files:
-            self.console.print("[yellow]No markdown files found to process.[/yellow]")
+            self.console.print("[yellow]No markdown files found matching the specified criteria.[/yellow]")
             return
 
         self.console.print(f"Found {len(markdown_files)} markdown files to process.")
@@ -374,9 +457,7 @@ class MedicalHistoryExtractorService:
                 progress.advance(task)
 
                 # --- Gemini Rate Limiting Delay ---
-                # Apply delay after processing each file (i.e., after the Gemini call)
                 if self.gemini_sleep_duration > 0 and i < len(markdown_files) - 1:
-                    # self.console.print(f"[dim]Waiting {self.gemini_sleep_duration:.2f}s before next Gemini API call...[/dim]") # Optional verbose log
                     time.sleep(self.gemini_sleep_duration)
                 # ---------------------------------
 
@@ -397,27 +478,63 @@ if __name__ == "__main__":
     OUTPUT_DIR = PROJECT_ROOT / "data" / "output" / "json" / "medical_history"
     GLOSSARY_PATH = PROJECT_ROOT / "documentation" / "PT-glossario.md"
 
+    # --- User Interaction for Filtering ---
+    console.print("\n[bold yellow]Select Processing Mode:[/bold yellow]")
+    console.print("1. Process All Files")
+    console.print("2. Process by File ID Range (e.g., 2301 to 2315)")
+    console.print("3. Process by Year Range (e.g., 2023 to 2024)")
+    console.print("4. Process First N Files (Limit)")
+
+    mode = IntPrompt.ask("Enter choice (1-4)", choices=["1", "2", "3", "4"], default=1)
+
+    limit: Optional[int] = None
+    file_id_range: Optional[Tuple[int, int]] = None
+    year_range: Optional[Tuple[int, int]] = None
+
+    if mode == 2:
+        while True:
+            start_id = IntPrompt.ask("Enter start File ID")
+            end_id = IntPrompt.ask("Enter end File ID")
+            if start_id <= end_id:
+                file_id_range = (start_id, end_id)
+                break
+            else:
+                console.print("[red]Error: Start ID must be less than or equal to End ID.[/red]")
+    elif mode == 3:
+         while True:
+            start_year = IntPrompt.ask("Enter start Year (e.g., 2023)")
+            end_year = IntPrompt.ask("Enter end Year (e.g., 2024)")
+            if 2000 <= start_year <= 2099 and 2000 <= end_year <= 2099: # Basic year validation
+                if start_year <= end_year:
+                    year_range = (start_year, end_year)
+                    break
+                else:
+                    console.print("[red]Error: Start Year must be less than or equal to End Year.[/red]")
+            else:
+                console.print("[red]Error: Please enter valid 4-digit years (e.g., 2023).[/red]")
+    elif mode == 4:
+        limit = IntPrompt.ask("Enter the maximum number of files to process", default=10)
+        if limit <= 0:
+            console.print("[yellow]Limit must be positive. Processing all files instead.[/yellow]")
+            limit = None # Reset to process all if invalid limit given
+
+    # --- Initialize and Run Service ---
     try:
-        console.print("\n[bold yellow]Starting Test Run (limit=10 files)...[/bold yellow]")
+        console.print("\n[bold yellow]Initializing Extractor Service...[/bold yellow]")
         extractor_service = MedicalHistoryExtractorService(
             input_dir=str(INPUT_DIR),
             output_dir=str(OUTPUT_DIR),
             glossary_path=str(GLOSSARY_PATH),
-            gemini_rate_limit_rpm=DEFAULT_GEMINI_RATE_LIMIT_RPM, # Pass Gemini limit
-            snomed_rate_limit_rpm=DEFAULT_SNOMED_RATE_LIMIT_RPM  # Pass SNOMED limit
+            gemini_rate_limit_rpm=DEFAULT_GEMINI_RATE_LIMIT_RPM,
+            snomed_rate_limit_rpm=DEFAULT_SNOMED_RATE_LIMIT_RPM
         )
-        extractor_service.process_files(limit=10)
 
-        # --- Optional: Full Run ---
-        # console.print("\n[bold green]Starting Full Run...[/bold green]")
-        # full_run_service = MedicalHistoryExtractorService(
-        #     input_dir=str(INPUT_DIR),
-        #     output_dir=str(OUTPUT_DIR),
-        #     glossary_path=str(GLOSSARY_PATH),
-        #     gemini_rate_limit_rpm=DEFAULT_GEMINI_RATE_LIMIT_RPM,
-        #     snomed_rate_limit_rpm=DEFAULT_SNOMED_RATE_LIMIT_RPM # Adjust if needed
-        # )
-        # full_run_service.process_files()
+        console.print("\n[bold green]Starting Processing Run...[/bold green]")
+        extractor_service.process_files(
+            limit=limit,
+            file_id_range=file_id_range,
+            year_range=year_range
+        )
 
     except ValueError as e:
         console.print(f"[bold red]Initialization failed: {e}[/bold red]")
