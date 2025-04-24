@@ -19,8 +19,9 @@ from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
 
 # --- Configuration ---
 load_dotenv()
-GEMINI_MODEL_NAME = "gemini-2.5-pro-preview-03-25"
-DEFAULT_RATE_LIMIT_RPM = 5
+GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-04-17" # As per user's file
+DEFAULT_GEMINI_RATE_LIMIT_RPM = 10 # Requests per minute for Gemini API
+
 
 # --- Pydantic Models ---
 
@@ -199,6 +200,9 @@ class MedicationExtractorService:
                     temperature=0.1,
                     response_mime_type='application/json',
                     response_schema=SimpleMedicationList.model_json_schema(),
+                    thinking_config=genai.types.ThinkingConfig(
+                        thinking_budget=4096
+                    ),
                 ),
             )
             if response.text:
@@ -375,7 +379,7 @@ if __name__ == "__main__":
         extractor_service = MedicationExtractorService(
             input_dir=str(INPUT_DIR),
             output_dir=str(OUTPUT_DIR),
-            rate_limit_rpm=DEFAULT_RATE_LIMIT_RPM
+            rate_limit_rpm=DEFAULT_GEMINI_RATE_LIMIT_RPM
         )
         extractor_service.process_files(limit=10)
 
