@@ -10,7 +10,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from rich.prompt import Prompt, IntPrompt
 from rich.table import Table
 
-from pydantic_extracter.burns_extracter_gemini_genai import BurnsExtracter
+from pydantic_extracter.old.burns_extracter_gemini_genai import BurnsExtracter
 from typing import List, Optional, Tuple
 import time
 from pydantic_extracter.rate_limiter import RateLimiter

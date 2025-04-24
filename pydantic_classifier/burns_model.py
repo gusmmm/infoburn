@@ -51,6 +51,7 @@ class BurnInjury(BaseModel):
     laterality: Laterality = Field(description="Side of the body affected by the burn.")
     depth: BurnDepth = Field(description="Depth of the burn injury.")
     circumferencial: bool = Field(description="Indicates if the burn encircles the body part completely.")
+    provenance: str = Field(description="The sentences or expressions in the original text where the information was obtained.")
 
     
 
