@@ -5,6 +5,13 @@ from datetime import date
 
 # This module defines models for representing a patient's medical history,
 # including conditions, medications, and surgeries.
+class SnomedConcept(BaseModel):
+    """
+    Represents a SNOMED-CT concept for standardized terminology.
+    """
+    sctid: str = Field(description="The unique SNOMED CT Identifier (SCTID).")
+    term: str = Field(description="The preferred human-readable term for the SCTID.")
+
 
 # class DieaseaseCategory(str, Enum)
 # This enum classifies various disease categories based on the ICD-11 classification.
@@ -34,20 +41,24 @@ class DiseaseCategory(str, Enum):
     EXTERNAL_CAUSES = "External causes of morbidity or mortality"
     HEALTH_FACTORS = "Factors influencing health status or contact with health services"
     TRADITIONAL_MEDICINE = "Supplementary Chapter Traditional Medicine Conditions - Module I"
-
+    UNKNOWN = "Unknown or Unspecified"
 # This class represents a disease or condition with its name and category.
 # It is used to classify diseases based on the ICD-11 classification.
 class Disease(BaseModel):
-    name: str = Field(
-        description="Name of the disease or condition (e.g., 'Diabetes Mellitus', 'Hypertension')"
-    )
+    name: str = Field(description="The name of the disease or condition as extracted.")
     category: DiseaseCategory = Field(
-        description="Category of the disease based on ICD-11 classification"
+        default=DiseaseCategory.UNKNOWN, # Default if Gemini doesn't provide it
+        description="The category of the disease based on standard classifications."
     )
-    notes: str = Field(
-        None,
-        description="Additional details about the condition from the medical text"
+    snomed_classification: Optional[SnomedConcept] = Field( # Added field
+        None, description="SNOMED-CT classification for the disease name."
     )
+    provenance: str = Field(description="The original pieces of text you used to extract the disease and any additional notes or comments about the disease.")
+
+
+class PreviousMedicalHistory(BaseModel):
+    ID: Optional[str] = Field(None, description="Patient identifier, derived from the source filename.") # Keep optional here, set in _save_json
+    previous_diseases: List[Disease] = Field(description="A list of diseases or conditions the patient had prior to the current admission.")
 
 class MedicationFrequency(str, Enum):
     """Standard medication frequencies."""
@@ -61,21 +72,6 @@ class MedicationFrequency(str, Enum):
     PRN = "As needed"
     OTHER = "Other (specify in frequency_other)"
 
-class SnomedConcept(BaseModel):
-    """
-    Represents a SNOMED-CT concept, including its unique identifier and
-    human-readable term. Essential for semantic interoperability.
-    """
-    sctid: str = Field(
-        description="The unique SNOMED CT Identifier (SCTID) for the concept. "
-                    "This is the primary key for interoperability.",
-        examples=["373873005"] # Example: SCTID for 'Angiotensin-converting enzyme inhibitor product'
-    )
-    term: str = Field(
-        description="The preferred human-readable description (term) associated "
-                    "with the SCTID.",
-        examples=["Angiotensin-converting enzyme inhibitor product"]
-    )
 
 class Medication(BaseModel):
     """

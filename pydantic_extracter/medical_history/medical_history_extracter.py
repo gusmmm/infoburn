@@ -1,108 +1,85 @@
-import os
 import json
 import time
-import re # Import regex module
+import re
 from pathlib import Path
-from typing import List, Optional, Dict, Tuple # Added Tuple
+from typing import List, Optional, Dict, Tuple
 from enum import Enum
+from collections import defaultdict
+import copy
 
+# Pydantic and Google GenAI
 from pydantic import BaseModel, Field, ValidationError
 from google import genai
 from google.genai import types
 from google.api_core import exceptions as google_exceptions
 
-# Import the SNOMED CT diagnosis lookup function
-from core_tools.diagnosis import find_diagnosis_snomed_code
-
+# Environment and Rich UI
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
-from rich.prompt import Prompt, IntPrompt, Confirm # Import rich prompts
+from rich.prompt import Prompt, IntPrompt, Confirm
+from rich.table import Table
+
+# Local Imports
+from pydantic_extracter.genai_client import GenAIClientManager
+from pydantic_extracter.medical_history.medical_history_template import get_medical_history_prompt_template
+
+# Import the SNOMED CT diagnosis lookup function
+from core_tools.diagnosis import find_diagnosis_snomed_code
+
+#local model imports
+from pydantic_classifier.medical_history import SnomedConcept, DiseaseCategory, Disease, PreviousMedicalHistory
 
 # --- Configuration ---
 load_dotenv()
-#GEMINI_MODEL_NAME = "gemini-2.5-pro-preview-03-25" # Updated model name
 GEMINI_MODEL_NAME = "gemini-2.5-flash-preview-04-17"
-DEFAULT_GEMINI_RATE_LIMIT_RPM = 10 # Specific name for Gemini limit
-DEFAULT_SNOMED_RATE_LIMIT_RPM = 30 # Separate limit for SNOMED lookups (adjust as needed)
+DEFAULT_GEMINI_RATE_LIMIT_RPM = 10
+DEFAULT_SNOMED_RATE_LIMIT_RPM = 30
+GEMINI_TEMPERATURE = 0.1
+GEMINI_RESPONSE_MIME_TYPE = 'application/json'
+GEMINI_SYSTEM_INSTRUCTION = "You are a meticulous data scientist specializing in extracting structured medical information from clinical texts."
+GEMINI_THINKING_BUDGET = 4096
 
-# --- Pydantic Models ---
+# --- Prompt Template ---
+EXTRACTION_PROMPT_TEMPLATE = get_medical_history_prompt_template()
 
-class SnomedConcept(BaseModel):
-    """
-    Represents a SNOMED-CT concept for standardized terminology.
-    """
-    sctid: str = Field(description="The unique SNOMED CT Identifier (SCTID).")
-    term: str = Field(description="The preferred human-readable term for the SCTID.")
-
-class DiseaseCategory(str, Enum):
-    INFECTIOUS = "Certain infectious or parasitic diseases"
-    NEOPLASMS = "Neoplasms"
-    BLOOD_DISORDERS = "Diseases of the blood or blood-forming organs"
-    IMMUNE_SYSTEM = "Diseases of the immune system"
-    ENDOCRINE_METABOLIC = "Endocrine, nutritional or metabolic diseases"
-    MENTAL_BEHAVIORAL = "Mental, behavioural or neurodevelopmental disorders"
-    SLEEP_DISORDERS = "Sleep-wake disorders"
-    NERVOUS_SYSTEM = "Diseases of the nervous system"
-    VISUAL_SYSTEM = "Diseases of the visual system"
-    EAR_DISORDERS = "Diseases of the ear or mastoid process"
-    CIRCULATORY_SYSTEM = "Diseases of the circulatory system"
-    RESPIRATORY_SYSTEM = "Diseases of the respiratory system"
-    DIGESTIVE_SYSTEM = "Diseases of the digestive system"
-    SKIN_DISORDERS = "Diseases of the skin"
-    MUSCULOSKELETAL = "Diseases of the musculoskeletal system or connective tissue"
-    GENITOURINARY = "Diseases of the genitourinary system"
-    SEXUAL_HEALTH = "Conditions related to sexual health"
-    PREGNANCY = "Pregnancy, childbirth or the puerperium"
-    PERINATAL = "Certain conditions originating in the perinatal period"
-    DEVELOPMENTAL = "Developmental anomalies"
-    SYMPTOMS_SIGNS = "Symptoms, signs or clinical findings, not elsewhere classified"
-    INJURY_POISONING = "Injury, poisoning or certain other consequences of external causes"
-    EXTERNAL_CAUSES = "External causes of morbidity or mortality"
-    HEALTH_FACTORS = "Factors influencing health status or contact with health services"
-    TRADITIONAL_MEDICINE = "Supplementary Chapter Traditional Medicine Conditions - Module I"
-    UNKNOWN = "Unknown or Unspecified"
-
-class Disease(BaseModel):
-    name: str = Field(description="The name of the disease or condition as extracted.")
-    category: DiseaseCategory = Field(
-        default=DiseaseCategory.UNKNOWN, # Default if Gemini doesn't provide it
-        description="The category of the disease based on standard classifications."
-    )
-    snomed_classification: Optional[SnomedConcept] = Field( # Added field
-        None, description="SNOMED-CT classification for the disease name."
-    )
-    note: str = Field(description="The original pieces of text you used to extract the disease and any additional notes or comments about the disease.")
-
-class PreviousMedicalHistory(BaseModel):
-    ID: Optional[str] = Field(None, description="Patient identifier, derived from the source filename.") # Keep optional here, set in _save_json
-    previous_diseases: List[Disease] = Field(description="A list of diseases or conditions the patient had prior to the current admission.")
-
-
-# --- Service Class ---
 class MedicalHistoryExtractorService:
     """
     Extracts previous medical history from markdown files using Google Gemini API
     and enriches it with SNOMED CT codes. Allows filtering files by ID range or year range.
+    Uses GenAIClientManager for API access.
     """
     def __init__(self,
-                 input_dir: str,
-                 output_dir: str,
-                 glossary_path: str,
-                 gemini_rate_limit_rpm: int = DEFAULT_GEMINI_RATE_LIMIT_RPM,
-                 snomed_rate_limit_rpm: int = DEFAULT_SNOMED_RATE_LIMIT_RPM):
+                input_dir: str,
+                output_dir: str,
+                glossary_path: str,
+                gemini_rate_limit_rpm: int = DEFAULT_GEMINI_RATE_LIMIT_RPM,
+                snomed_rate_limit_rpm: int = DEFAULT_SNOMED_RATE_LIMIT_RPM):
+        """
+        Initializes the MedicalHistoryExtractorService.
+        Args:
+            input_dir: Path to the directory containing input markdown files.
+            output_dir: Path to the directory where output JSON files will be saved.
+            glossary_path: Path to the glossary file (optional).
+            gemini_rate_limit_rpm: Maximum requests per minute allowed for the Gemini API.
+            snomed_rate_limit_rpm: Maximum requests per minute allowed for SNOMED lookups.
+        """
         self.console = Console()
+        self.client: Optional[genai.Client] = None  # Initialize client attribute
+
         try:
-            self.api_key = self._load_api_key()
-            self.client = self._initialize_client()
+            # Use GenAIClientManager to get the client
+            client_manager = GenAIClientManager(console=self.console)
+            self.client = client_manager.get_client()  # This handles API key loading and client creation
         except ValueError as e:
+            # Error during client initialization (e.g., missing API key) is fatal
             self.console.print(f"[bold red]Error initializing service: {e}[/bold red]")
-            raise
+            raise  # Stop execution if essential setup fails
 
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
         self.glossary_path = Path(glossary_path)
-        self.glossary_content: Optional[str] = None
+        self.glossary_content: Optional[str] = None  # Lazy loaded
 
         # Gemini Rate Limiting Setup
         self.gemini_rate_limit_rpm = gemini_rate_limit_rpm
@@ -126,24 +103,7 @@ class MedicalHistoryExtractorService:
         self.console.print(f"Input directory: '{self.input_dir}'")
         self.console.print(f"Output directory: '{self.output_dir}'")
         self.console.print(f"Glossary path: '{self.glossary_path}'")
-
-    def _load_api_key(self) -> str:
-        """Loads the Gemini API key from environment variables."""
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY environment variable not found.")
-        return api_key
-
-    def _initialize_client(self) -> genai.Client:
-        """Initializes the Google Gemini API client."""
-        try:
-            client = genai.Client(api_key=self.api_key)
-            # Optional: Test connection or list models if needed
-            # client.models.list()
-            self.console.print("[green]Gemini client initialized successfully.[/green]")
-            return client
-        except Exception as e:
-            raise ValueError(f"Failed to initialize Gemini client: {e}")
+        self.console.print(f"Using Gemini Model: '{GEMINI_MODEL_NAME}'")
 
     def _ensure_output_dir(self):
         """Ensures the output directory exists, creating it if necessary."""
@@ -256,54 +216,78 @@ class MedicalHistoryExtractorService:
             return None
 
     def _extract_history(self, medical_text: str) -> Optional[PreviousMedicalHistory]:
-        """Extracts medical history using the Gemini API."""
-        glossary = self._load_glossary()
-        prompt = f"""This is a clinical case text:
-        --- START TEXT ---
-        {medical_text}
-        --- END TEXT ---
-
-        The text is a critical care burn patient clinical case, potentially containing admission, release, and death notes. It is written in European Portuguese.
-
-        Your task is to extract the patient's previous medical history (diseases or conditions they had *before* the current burn incident).
-        When you find a disease or condition, translate it to standardized English medical terminology.
-
-        Use the following glossary for potentially ambiguous Portuguese terms if needed:
-        --- START GLOSSARY ---
-        {glossary if glossary else "No glossary provided."}
-        --- END GLOSSARY ---
-
-        Return *only* the previous medical history structured according to the provided JSON schema. The output must be in English.
         """
+        Extracts medical history from the medical text using the Gemini API via the managed client.
+
+        Args:
+            medical_text: The content of the medical case file.
+
+        Returns:
+            A PreviousMedicalHistory object containing the extracted data, or None if extraction fails.
+        """
+        if not self.client:
+            self.console.print("[bold red]Error: Gemini client is not initialized. Cannot perform extraction.[/bold red]")
+            return None
+
+        glossary = self._load_glossary()
+        
+        # Format the enum values as a string
+        category_enums = ", ".join([f'"{item.value}"' for item in DiseaseCategory])
+        
+        # Get the JSON schema
+        schema_json = PreviousMedicalHistory.model_json_schema()
+        
+        # Remove irrelevant parts if needed to make it more focused
+        if 'properties' in schema_json and 'ID' in schema_json['properties']:
+            schema_json['properties'].pop('ID', None)  # Remove ID from schema if present
+        
+        # Format the template with all required values
+        prompt = EXTRACTION_PROMPT_TEMPLATE.format(
+            medical_text=medical_text,
+            glossary=glossary if glossary else "No glossary provided.",
+            category_enums=category_enums,
+            schema_json=json.dumps(schema_json, indent=2)
+        )
 
         try:
+            # Configure generation settings using constants
+            generation_config = {
+                "temperature": GEMINI_TEMPERATURE,
+                "response_mime_type": GEMINI_RESPONSE_MIME_TYPE,
+            }
+
+            self.console.print(f"[grey50]Sending request to Gemini...[/grey50]")
             response = self.client.models.generate_content(
                 model=GEMINI_MODEL_NAME,
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction="You are a meticulous data scientist specializing in extracting structured medical information from clinical texts.",
-                    temperature=0.1, # Slightly increased for potentially better extraction nuance
-                    response_mime_type='application/json',
-                    response_schema=PreviousMedicalHistory.model_json_schema(),
-                    thinking_config=genai.types.ThinkingConfig(
-                        thinking_budget=4096
-                    ),
-
-                    # Add safety settings if needed, e.g., to block harmful content
-                    # safety_settings={...}
-                )
+                config=generation_config,
             )
 
             # Attempt to parse the JSON response using the Pydantic model
-            # The SDK should ideally return validated data if response_schema is used,
-            # but explicit validation adds robustness.
             if response.text:
                 try:
                     # Parse the JSON string from the response text
                     response_data = json.loads(response.text)
+                    
+                    # Handle case where Gemini returns a simple list of diseases
+                    if isinstance(response_data, list):
+                        self.console.print("[yellow]Received a simple list of diseases instead of proper JSON structure. Adapting format...[/yellow]")
+                        # Convert the list to proper structure with required provenance field
+                        formatted_data = {
+                            "previous_diseases": [
+                                {
+                                    "name": disease_name, 
+                                    "provenance": "Automatically extracted from text without specific provenance data"
+                                } 
+                                for disease_name in response_data if disease_name
+                            ]
+                        }
+                        response_data = formatted_data
+                    
                     # Validate the parsed data against the Pydantic model
                     validated_data = PreviousMedicalHistory.model_validate(response_data)
                     return validated_data
+                    
                 except json.JSONDecodeError as json_err:
                     self.console.print(f"[red]Error decoding JSON response: {json_err}[/red]")
                     self.console.print(f"Raw response text: {response.text[:500]}...") # Log part of the raw response
@@ -321,7 +305,6 @@ class MedicalHistoryExtractorService:
                  self.console.print("[yellow]Warning: Received empty response from API.[/yellow]")
                  # Return an empty structure instead of None if appropriate
                  return PreviousMedicalHistory(previous_diseases=[])
-
 
         except google_exceptions.GoogleAPIError as api_err:
             self.console.print(f"[bold red]Google API Error during extraction: {api_err}[/bold red]")
@@ -473,7 +456,7 @@ if __name__ == "__main__":
     console = Console()
     console.print("[bold blue]Medical History Extractor[/bold blue]")
 
-    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    PROJECT_ROOT = Path(__file__).resolve().parents[2]
     INPUT_DIR = PROJECT_ROOT / "data" / "output" / "markdown" / "clean"
     OUTPUT_DIR = PROJECT_ROOT / "data" / "output" / "json" / "medical_history"
     GLOSSARY_PATH = PROJECT_ROOT / "documentation" / "PT-glossario.md"
